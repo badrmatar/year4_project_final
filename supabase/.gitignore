@@ -1,0 +1,7 @@
+# Supabase
+.branches
+.temp
+.env
+# Supabase environment variables
+supabase/.env
+supabase/functions/.env
