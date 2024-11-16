@@ -78,7 +78,7 @@ serve(async (req) => {
         status: 400,
       });
     }
-
+/*
     if (existingUser) {
       console.warn(`User already exists with email: ${email}`);
       return new Response(
@@ -104,14 +104,19 @@ serve(async (req) => {
         status: 400,
       });
     }
-
+*/
+    if (!existingUser) {
+      console.warn(`User does not exists with email: ${email}`);
+      return new Response(
+        JSON.stringify({ error: 'User already exists with this email.' }),
+        { status: 409 }
+      );
+    }
     // Registration successful
     const successResponse = {
-      message: 'User registered successfully.',
-      user_id: data[0].id,
-      email: data[0].email,
+      message: 'User found successfully.',
     };
-    console.log(`User registered successfully: ${email}`);
+    console.log(`User found successfully: ${email}`);
     console.log(`Response: ${JSON.stringify(successResponse)}`);
 
     return new Response(
