@@ -68,8 +68,9 @@ serve(async (req) => {
     // Check if the email already exists
     const { data: existingUser, error: fetchError } = await supabase
       .from('users')
-      .select('user_id')
+      .select('user_id, name, email')
       .eq('email', email)
+      .eq('password', password)
       .maybeSingle();
 
     if (fetchError) {
@@ -115,6 +116,9 @@ serve(async (req) => {
     // Registration successful
     const successResponse = {
       message: 'User found successfully.',
+      id: existingUser.user_id,
+      name: existingUser.name,
+      email: existingUser.email,
     };
     console.log(`User found successfully: ${email}`);
     console.log(`Response: ${JSON.stringify(successResponse)}`);

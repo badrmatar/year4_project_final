@@ -1,13 +1,17 @@
 // lib/services/auth_service.dart
 
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+
+import '../models/user_model.dart';
 
 class AuthService {
   final String userLoginFunctionUrl = 'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/user_login';
   final String registerFunctionUrl = 'https://<your-project-ref>.functions.supabase.co/register_user';
 
-  Future<bool> userLogin(String email, String password) async {
+  Future<bool> userLogin(BuildContext context, String email, String password) async {
     try {
       print('Sending login request with Email: $email and Password: $password'); // Remove password logging in production
       final response = await http.post(
@@ -22,7 +26,7 @@ class AuthService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
         print('Login successful: ${data['message']}');
-        // Optionally, store user data or tokens securely
+        UpdateUserModel(context, data);
         return true;
       } else {
         final error = jsonDecode(response.body);
@@ -35,7 +39,7 @@ class AuthService {
     }
   }
 
-  Future<bool> registerUser(String email, String password) async {
+  Future<bool> registerUser(BuildContext context, String email, String password) async {
     try {
       print('Sending registration request with Email: $email and Password: $password'); // Remove password logging in production
       final response = await http.post(
@@ -46,10 +50,9 @@ class AuthService {
         body: jsonEncode({'email': email, 'password': password}),
       );
 
-      if (response.statusCode == 201) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
         print('Registration successful: ${data['message']}');
-        // Optionally, store user data or tokens securely
         return true;
       } else {
         final error = jsonDecode(response.body);
@@ -62,9 +65,19 @@ class AuthService {
     }
   }
 
-  Future<bool> userLogout() async {
+  void UpdateUserModel(context, data)
+  {
+    Provider.of<UserModel>(context, listen: false).setUser(
+      id: data['id'],
+      email: data['email'],
+      name: data['name'],
+    );
+  }
+
+  Future<bool> userLogout(context) async {
     // Implement logout logic if you're managing sessions or tokens
     // For example, clear stored tokens or user data
+    Provider.of<UserModel>(context, listen: false).clearUser();
     return true;
   }
 }
