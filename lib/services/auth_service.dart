@@ -2,14 +2,16 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
-import '../models/user_model.dart';
+import '../models/user.dart';
 
 class AuthService {
   final String userLoginFunctionUrl = 'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/user_login';
-  final String registerFunctionUrl = 'https://<your-project-ref>.functions.supabase.co/register_user';
+  final String userSignupFunctionUrl = 'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/user_signup';
+  final String bearer_token = dotenv.env['BEARER_TOKEN']!;
 
   Future<bool> userLogin(BuildContext context, String email, String password) async {
     try {
@@ -18,7 +20,7 @@ class AuthService {
         Uri.parse(userLoginFunctionUrl),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3aGpsZ3Z0anl3aGFjZ3F0enFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5Mjc5MTQsImV4cCI6MjA0NjUwMzkxNH0.46psoHtC8Z7E_Mxd8eGY0kNGbeDcRqAsucgRrBlzaxY'
+          'Authorization': 'Bearer $bearer_token'
         },
         body: jsonEncode({'email': email, 'password': password}),
       );
@@ -39,15 +41,16 @@ class AuthService {
     }
   }
 
-  Future<bool> registerUser(BuildContext context, String email, String password) async {
+  Future<bool> registerUser(BuildContext context, String username, String email, String password) async {
     try {
-      print('Sending registration request with Email: $email and Password: $password'); // Remove password logging in production
+      print('Sending registration request with Email: $email and Password: $password and name: $username'); // Remove password logging in production
       final response = await http.post(
-        Uri.parse(registerFunctionUrl),
+        Uri.parse(userSignupFunctionUrl),
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': 'Bearer $bearer_token'
         },
-        body: jsonEncode({'email': email, 'password': password}),
+        body: jsonEncode({'username': username, 'email': email, 'password': password}),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {

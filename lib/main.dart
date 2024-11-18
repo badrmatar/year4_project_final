@@ -1,20 +1,23 @@
 // main.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'models/user_model.dart';
+import 'package:year4_project/pages/signup_page.dart';
+import 'models/user.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
 
 Future<void> initSupabase() async {
   await Supabase.initialize(
-    url: 'https://ywhjlgvtjywhacgqtzqh.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3aGpsZ3Z0anl3aGFjZ3F0enFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5Mjc5MTQsImV4cCI6MjA0NjUwMzkxNH0.46psoHtC8Z7E_Mxd8eGY0kNGbeDcRqAsucgRrBlzaxY',
+    url: dotenv.env['SUPABASE_URL']!,
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load();
   await initSupabase();
   runApp(
     ChangeNotifierProvider(
@@ -30,13 +33,14 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'My Supabase App',
+      title: 'Running App',
       debugShowCheckedModeBanner: false,
       initialRoute: '/',
       routes: {
         '/': (context) => const LoginPage(),
         '/home': (context) => const HomePage(),
         '/login': (context) => const LoginPage(),
+        '/signup': (context) => const SignUpPage(),
       },
     );
   }

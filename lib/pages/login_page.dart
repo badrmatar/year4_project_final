@@ -94,6 +94,20 @@ class _LoginPageState extends State<LoginPage> {
                 onPressed: _handleLogin,
                 child: const Text('Login'),
               ),
+              const SizedBox(height: 32.0),
+
+
+              TextButton(
+
+                onPressed: () {
+
+                  Navigator.pushNamed(context, '/signup');
+
+                },
+
+                child: const Text('Don\'t have an account? Sign up'),
+
+              ),
             ],
           ),
         ),

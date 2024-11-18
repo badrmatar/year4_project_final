@@ -1,4 +1,4 @@
-// lib/models/user_model.dart
+// lib/models/user.dart
 
 import 'package:flutter/foundation.dart';
 
