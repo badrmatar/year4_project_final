@@ -41,6 +41,18 @@ dependencies:
   json_annotation: ^4.8.1
 
 
+
+  # Core location tracking
+  geolocator: ^13.0.2  # Precise GPS location tracking
+
+  # Maps visualization
+  google_maps_flutter: ^2.10.0 # Official Google Maps SDK for Flutter
+
+  # Background services & permissions
+  permission_handler: ^11.3.1  # Handle location permissions
+  background_fetch: ^1.3.7 # For background tracking
+
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
