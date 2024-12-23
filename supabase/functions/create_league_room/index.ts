@@ -41,3 +41,4 @@ serve(async (req: Request) => {
     league_room_name: data.league_room_name
   }), { status: 201 })
 })
+
