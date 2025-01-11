@@ -118,6 +118,21 @@ serve(async (req) => {
       );
     }
 
+const successResponse = {
+        message: 'Not Existing waiting room found.',
+        waiting_room_id: null
+      };
+      console.log(`Found existing waiting room: ${JSON.stringify(successResponse)}`);
+
+
+    return new Response(
+        JSON.stringify(successResponse),
+        {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }
+      );
+/*
     // If no waiting room with null league_room_id exists, get the latest waiting room for this user
     const { data: latestWaitingRoom, error: latestError } = await supabase
       .from('waiting_rooms')
@@ -147,7 +162,7 @@ serve(async (req) => {
         headers: { 'Content-Type': 'application/json' },
         status: 200,
       }
-    );
+    );*/
 
   } catch (error) {
     console.error('Unexpected error:', error);

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:year4_project/pages/map_page.dart';
 import 'package:year4_project/pages/signup_page.dart';
+import 'package:year4_project/pages/waiting_room.dart';
 import 'models/user.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
@@ -33,15 +34,17 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final user = Provider.of<UserModel>(context);
     return MaterialApp(
       title: 'Running App',
       debugShowCheckedModeBanner: false,
       initialRoute: '/',
       routes: {
-        '/': (context) => CurrentLocationMapPage(),
+        '/': (context) => const HomePage(),
         '/home': (context) => const HomePage(),
         '/login': (context) => const LoginPage(),
         '/signup': (context) => const SignUpPage(),
+        '/waiting_room': (context) => WaitingRoomScreen(userId: user.id,),
       },
     );
   }

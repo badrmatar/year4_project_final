@@ -56,7 +56,12 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: Center(
-        child: Text('Welcome, ${user.email}!'),
+        child: IconButton(
+          icon: const Icon(Icons.logout),
+          onPressed: () async {
+            Navigator.pushReplacementNamed(context, '/waiting_room');
+          },
+        )
       ),
     );
   }
