@@ -153,10 +153,42 @@ Future<bool> joinWaitingRoom(int userId, int waitingRoomId) async {
 
 /// Fetch the list of users in a specific waiting room. Return user names or emails.
 Future<List<String>> fetchWaitingRoomUsers(int waitingRoomId) async {
-  // 1) You might have an endpoint to fetch all users in a waiting_room
-  // 2) Return a list of user names (or your user model)
-  // For demonstration, returning mock data.
-  return ['User 1', 'User 2', 'User 3'];
+  final url =
+      'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/get_waiting_room_users';
+  final headers = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $bearerToken',
+  };
+
+  try {
+    final response = await http.post(
+      Uri.parse(url),
+      headers: headers,
+      body: jsonEncode({ 'waiting_room_id': waitingRoomId }),
+    );
+
+    if (response.statusCode == 200) {
+      // The Edge Function should return something like:
+      // [
+      //   { "user_id": 1, "name": "Alice" },
+      //   { "user_id": 2, "name": "Bob" }
+      // ]
+      final List<dynamic> data = jsonDecode(response.body);
+
+      // Convert each item into a string. For example, just use the "name".
+      final List<String> userNames = data
+          .map((item) => item['name'] as String)
+          .toList();
+
+      return userNames;
+    } else {
+      print('Error fetching waiting room users: ${response.body}');
+      return [];
+    }
+  } catch (e) {
+    print('Exception in fetchWaitingRoomUsers: $e');
+    return [];
+  }
 }
 
 class WaitingRoomScreen extends StatefulWidget {
