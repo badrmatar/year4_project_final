@@ -9,6 +9,7 @@ import 'package:year4_project/pages/waiting_room.dart';
 import 'models/user.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
+import 'pages/challenges_page.dart';
 
 Future<void> initSupabase() async {
   await Supabase.initialize(
@@ -45,6 +46,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(),
         '/signup': (context) => const SignUpPage(),
         '/waiting_room': (context) => WaitingRoomScreen(userId: user.id,),
+        '/challenges': (context) => const ChallengesPage(), // <-- new route
       },
     );
   }

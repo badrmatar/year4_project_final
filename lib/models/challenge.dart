@@ -1,26 +1,37 @@
-// challenge.dart
 import 'package:json_annotation/json_annotation.dart';
 
-part 'challenge.g.dart';
+part 'challenge.g.dart'; // Required for json_serializable
 
 @JsonSerializable()
 class Challenge {
+  @JsonKey(name: 'challenge_id') // Maps to `challenge_id` in DB/JSON
   final int challengeId;
+
+  @JsonKey(name: 'start_time') // Maps to `start_time` in DB/JSON
   final DateTime startTime;
-  final int duration;
-  final int earningPoints;
-  final String difficulty;
-  final String type;
+
+  final int? duration; // Optional if DB allows NULL for `duration`
+
+  @JsonKey(name: 'earning_points') // Maps to `earning_points` in DB/JSON
+  final int? earningPoints; // Optional if DB allows NULL for `earning_points`
+
+  final String difficulty; // Required if non-NULL in DB
+
+  final int? length; // Optional if DB allows NULL for `length`
 
   Challenge({
     required this.challengeId,
     required this.startTime,
-    required this.duration,
-    required this.earningPoints,
+    this.duration,
+    this.earningPoints,
     required this.difficulty,
-    required this.type,
+    this.length,
   });
 
-  factory Challenge.fromJson(Map<String, dynamic> json) => _$ChallengeFromJson(json);
+  // Factory constructor to parse JSON into the `Challenge` object
+  factory Challenge.fromJson(Map<String, dynamic> json) =>
+      _$ChallengeFromJson(json);
+
+  // Method to convert `Challenge` object into JSON
   Map<String, dynamic> toJson() => _$ChallengeToJson(this);
 }

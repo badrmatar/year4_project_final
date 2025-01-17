@@ -40,29 +40,31 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final user = Provider.of<UserModel>(context);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Home'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await _authService.userLogout(context);
-              Navigator.pushReplacementNamed(context, '/login');
-            },
-          ),
-        ],
       ),
       body: Center(
-        child: IconButton(
-          icon: const Icon(Icons.logout),
-          onPressed: () async {
-            Navigator.pushReplacementNamed(context, '/waiting_room');
-          },
-        )
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pushNamed(context, '/waiting_room');
+              },
+              child: const Text('Go to Waiting Room'),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pushNamed(context, '/challenges');
+              },
+              child: const Text('View Challenges'),
+            ),
+          ],
+        ),
       ),
     );
   }
+
 }
