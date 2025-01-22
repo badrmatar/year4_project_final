@@ -10,7 +10,7 @@ import 'models/user.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
 import 'pages/challenges_page.dart';
-
+import 'pages/active_run_page.dart';
 Future<void> initSupabase() async {
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
@@ -46,7 +46,8 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(),
         '/signup': (context) => const SignUpPage(),
         '/waiting_room': (context) => WaitingRoomScreen(userId: user.id,),
-        '/challenges': (context) => const ChallengesPage(), // <-- new route
+        '/challenges': (context) => const ChallengesPage(),
+        '/active_run': (context) => ActiveRunPage(),
       },
     );
   }
