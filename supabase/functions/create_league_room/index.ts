@@ -1,39 +1,35 @@
-import { serve } from 'https://deno.land/std@0.175.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Load environment variables
-const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-// Create Supabase client using the service role key
-const supabase = createClient(supabaseUrl, supabaseKey)
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 serve(async (req: Request) => {
   try {
-    // Only allow POST
     if (req.method !== 'POST') {
       return new Response(JSON.stringify({ error: 'Method not allowed' }), {
         status: 405,
-      })
+      });
     }
 
-    // Parse JSON body
-    let body: any
+    let body: any;
     try {
-      body = await req.json()
-    } catch (_error) {
-      return new Response(JSON.stringify({
-        error: 'Invalid JSON body.',
-      }), { status: 400 })
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid JSON body.' }), {
+        status: 400,
+      });
     }
 
-    const { user_id } = body
+    const { user_id } = body;
 
-    // Validate input
     if (typeof user_id !== 'number') {
-      return new Response(JSON.stringify({
-        error: 'user_id must be a number.',
-      }), { status: 400 })
+      return new Response(JSON.stringify({ error: 'user_id must be a number.' }), {
+        status: 400,
+      });
     }
 
     // STEP 1: Get the waiting_room_id for this user where league_room_id is NULL.
@@ -42,89 +38,99 @@ serve(async (req: Request) => {
       .select('waiting_room_id')
       .eq('user_id', user_id)
       .is('league_room_id', null)
-      .maybeSingle()
+      .maybeSingle();
 
-    if (findWrError) {
-      return new Response(JSON.stringify({ error: findWrError.message }), {
-        status: 400,
-      })
-    }
-
-    if (!waitingRoomRow) {
-      // Means user has no waiting room with league_room_id = NULL
+    if (findWrError || !waitingRoomRow) {
       return new Response(JSON.stringify({
         error: 'No active waiting room found for this user.',
-      }), { status: 404 })
+      }), { status: 404 });
     }
 
-    const waiting_room_id = waitingRoomRow.waiting_room_id
+    const waiting_room_id = waitingRoomRow.waiting_room_id;
 
     // STEP 2: Fetch all users in that waiting_room_id (league_room_id still null).
     const { data: waitingUsers, error: waitingUsersError } = await supabase
       .from('waiting_rooms')
-      .select('waiting_room_id, user_id')
+      .select('user_id')
       .eq('waiting_room_id', waiting_room_id)
-      .is('league_room_id', null)
+      .is('league_room_id', null);
 
-    if (waitingUsersError) {
-      return new Response(JSON.stringify({ error: waitingUsersError.message }), {
-        status: 400,
-      })
-    }
-
-    if (!waitingUsers || waitingUsers.length === 0) {
+    if (waitingUsersError || !waitingUsers || waitingUsers.length === 0) {
       return new Response(JSON.stringify({
         error: 'No users found in this waiting room.',
-      }), { status: 404 })
+      }), { status: 404 });
     }
 
-    // STEP 3: Create a new league room.
-    // You can customize the league room name as needed.
-    const leagueRoomName = `New League Room - ${new Date().toISOString()}`
+    const totalUsers = waitingUsers.length;
+
+    // STEP 3: Validate that the number of users is even.
+    if (totalUsers % 2 !== 0) {
+      return new Response(JSON.stringify({
+        error: 'The number of participants must be even to create a league room.',
+      }), { status: 400 });
+    }
+
+    // STEP 4: Create a new league room.
+    const leagueRoomName = `New League Room - ${new Date().toISOString()}`;
     const { data: newLeagueRoom, error: leagueRoomError } = await supabase
       .from('league_rooms')
       .insert({ league_room_name: leagueRoomName })
-      .select('league_room_id, league_room_name')
-      .single()
+      .select('league_room_id')
+      .single();
 
     if (leagueRoomError || !newLeagueRoom) {
       return new Response(JSON.stringify({
         error: leagueRoomError?.message || 'Failed to create a league room.',
-      }), { status: 400 })
+      }), { status: 400 });
     }
 
-    // STEP 4: Assign this newly created league_room_id to all rows of this waiting_room_id
-    const { data: updatedRows, error: updateError } = await supabase
+    const league_room_id = newLeagueRoom.league_room_id;
+
+    // STEP 5: Assign this newly created league_room_id to all rows of this waiting_room_id.
+    const { error: updateError } = await supabase
       .from('waiting_rooms')
-      .update({ league_room_id: newLeagueRoom.league_room_id })
+      .update({ league_room_id })
       .eq('waiting_room_id', waiting_room_id)
-      .is('league_room_id', null)
-      .select()
+      .is('league_room_id', null);
 
     if (updateError) {
       return new Response(JSON.stringify({ error: updateError.message }), {
         status: 400,
-      })
+      });
     }
 
-    // Construct success response
-    return new Response(JSON.stringify({
-      message: 'Successfully moved users to new league room.',
-      league_room_id: newLeagueRoom.league_room_id,
-      league_room_name: newLeagueRoom.league_room_name,
-      total_users_moved: updatedRows?.length ?? 0,
-      updated_rows: updatedRows,
-    }), { status: 200 })
-  } catch (error) {
-    console.error('Unexpected error:', error)
-    const environment = Deno.env.get('ENVIRONMENT') || 'production'
-    const isDevelopment = environment === 'development'
-    const errorMessage = isDevelopment
-      ? `Internal Server Error: ${error instanceof Error ? error.message : String(error)}`
-      : 'Internal Server Error'
+    // STEP 6: Randomly distribute users into teams of 2.
+    const userIds = waitingUsers.map((user) => user.user_id);
+    const shuffledUserIds = userIds.sort(() => 0.5 - Math.random());
+    const teams = [];
 
-    return new Response(JSON.stringify({ error: errorMessage }), {
-      status: 500,
-    })
+    for (let i = 0; i < shuffledUserIds.length; i += 2) {
+      teams.push([shuffledUserIds[i], shuffledUserIds[i + 1]]);
+    }
+
+    for (const team of teams) {
+      const { error: createTeamError } = await supabase.functions.invoke(
+        'create_team',
+        { body: { user_ids: team, league_room_id } }
+      );
+
+      if (createTeamError) {
+        return new Response(JSON.stringify({
+          error: `Failed to create a team: ${createTeamError.message}`,
+        }), { status: 400 });
+      }
+    }
+
+    // Return success response.
+    return new Response(JSON.stringify({
+      message: 'League room and teams successfully created.',
+      league_room_id,
+      number_of_teams: teams.length,
+    }), { status: 201 });
+  } catch (error) {
+    console.error('Unexpected error:', error);
+    return new Response(JSON.stringify({
+      error: 'Internal Server Error',
+    }), { status: 500 });
   }
-})
+});
