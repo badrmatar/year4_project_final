@@ -40,7 +40,7 @@ dependencies:
   provider: ^6.1.2
   json_annotation: ^4.8.1
   location: ^7.0.1
-  # Core location tracking
+  intl: ^0.20.1
   geolocator: ^13.0.2  # Precise GPS location tracking
 
   # Maps visualization
