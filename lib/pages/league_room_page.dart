@@ -3,8 +3,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import '../models/waiting_room_user.dart';
-
 class LeagueRoomPage extends StatefulWidget {
   final int userId;
 
@@ -18,7 +16,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
   bool _isLoading = true;
   int? _leagueRoomId;
   String? _leagueRoomName;
-  List<WaitingRoomUser> _leagueUsers = [];
+  List<Map<String, dynamic>> _leagueTeams = [];
 
   @override
   void initState() {
@@ -30,7 +28,6 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Fetch league room ID for the user
       print('Debug: Fetching league room for userId ${widget.userId}');
       final leagueRoomId = await _getLeagueRoomId(widget.userId);
 
@@ -43,12 +40,12 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
       }
 
       print('Debug: Found league room ID: $leagueRoomId');
-      final users = await _fetchLeagueRoomUsers(leagueRoomId);
+      final teams = await _fetchLeagueTeams(leagueRoomId);
 
       setState(() {
         _leagueRoomId = leagueRoomId;
-        _leagueRoomName = "League Room $leagueRoomId"; // Placeholder
-        _leagueUsers = users;
+        _leagueRoomName = "League Room $leagueRoomId";
+        _leagueTeams = teams;
         _isLoading = false;
       });
     } catch (e) {
@@ -66,7 +63,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
 
     final headers = {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']!}', // Securely fetch token
+      'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']!}',
     };
 
     try {
@@ -90,32 +87,36 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     }
   }
 
-  Future<List<WaitingRoomUser>> _fetchLeagueRoomUsers(int leagueRoomId) async {
+  Future<List<Map<String, dynamic>>> _fetchLeagueTeams(int leagueRoomId) async {
     final url =
-        'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/get_waiting_room_users';
+        'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/get_league_teams'; // Fixed typo here
 
     final headers = {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']!}',
     };
 
-    final response = await http.post(
-      Uri.parse(url),
-      headers: headers,
-      body: jsonEncode({'waiting_room_id': leagueRoomId}),
-    );
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: headers,
+        body: jsonEncode({'league_room_id': leagueRoomId}),
+      );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body) as List<dynamic>;
-      return data
-          .map((item) => WaitingRoomUser(
-        userId: item['user_id'],
-        name: item['users']['name'],
-        dateJoined: DateTime.parse(item['created_at']),
-      ))
-          .toList();
-    } else {
-      throw Exception('Failed to fetch league room users');
+      print('Debug: Fetching teams for league room $leagueRoomId');
+      print('Debug: Response status: ${response.statusCode}');
+      print('Debug: Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List<dynamic>;
+        return List<Map<String, dynamic>>.from(data);
+      } else {
+        print('Error fetching league teams: ${response.body}');
+        return [];
+      }
+    } catch (e) {
+      print('Exception in _fetchLeagueTeams: $e');
+      return [];
     }
   }
 
@@ -152,13 +153,21 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
         const Divider(),
         Expanded(
           child: ListView.builder(
-            itemCount: _leagueUsers.length,
+            itemCount: _leagueTeams.length,
             itemBuilder: (context, index) {
-              final user = _leagueUsers[index];
+              final team = _leagueTeams[index];
+              final members = team['members'] as List<dynamic>;
+
               return ListTile(
-                title: Text(user.name),
-                subtitle: Text(
-                  "Joined: ${user.dateJoined.toLocal().toString().split(' ')[0]}",
+                title: Text(
+                  "Team: ${team['team_name']}",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: members.map<Widget>((member) {
+                    return Text("- ${member['name']} (ID: ${member['user_id']})");
+                  }).toList(),
                 ),
               );
             },
