@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:location/location.dart';
-import 'dart:async';
-import '/services/location_service.dart';
-import 'dart:math';
+import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
+import '../models/user.dart';
+import '../services/location_service.dart';
 
 class ActiveRunPage extends StatefulWidget {
   const ActiveRunPage({Key? key}) : super(key: key);
@@ -13,24 +18,16 @@ class ActiveRunPage extends StatefulWidget {
 
 class _ActiveRunPageState extends State<ActiveRunPage> {
   final LocationService _locationService = LocationService();
-
   LocationData? _startLocation;
   LocationData? _currentLocation;
-  double _distanceCovered = 0.0; // meters
+  double _distanceCovered = 0.0;
   int _secondsElapsed = 0;
   Timer? _timer;
-
   bool _isTracking = false;
-
-  /// AUTO-PAUSE FIELDS
-  bool _autoPaused = false;    // Whether we’re currently auto-paused
-  int _stillCounter = 0;       // Counts consecutive seconds below speed threshold
-
-  // Speed thresholds for pausing/resuming in m/s
-  // 0.5 m/s ~ 1.8 km/h (very slow walk)
-  // 1.0 m/s ~ 3.6 km/h (normal walk)
-  final double _pauseThreshold = 0.5;   // Below this => increment stillCounter
-  final double _resumeThreshold = 1.0;  // Above this => resume
+  bool _autoPaused = false;
+  int _stillCounter = 0;
+  final double _pauseThreshold = 0.5;
+  final double _resumeThreshold = 1.0;
 
   @override
   void initState() {
@@ -38,39 +35,29 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     _startRun();
   }
 
-  /// Start location & timer tracking
   void _startRun() async {
     final location = await _locationService.getCurrentLocation();
     if (location == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Unable to start tracking. Check location permissions."),
-        ),
-      );
+      _showLocationError();
       return;
     }
 
     setState(() {
       _startLocation = location;
       _isTracking = true;
-      _secondsElapsed = 0;
       _distanceCovered = 0.0;
+      _secondsElapsed = 0;
       _autoPaused = false;
     });
 
-    // Start the timer for elapsed time
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      // Only increment time if NOT auto-paused
       if (!_autoPaused) {
-        setState(() {
-          _secondsElapsed++;
-        });
+        setState(() => _secondsElapsed++);
       }
     });
 
-    // Listen for location updates
     _locationService.trackLocation().listen((newLocation) {
-      if (!_isTracking) return; // If we've ended the run, ignore further updates
+      if (!_isTracking) return;
 
       final speed = (newLocation.speed ?? 0.0).clamp(0.0, double.infinity);
       _handleAutoPauseLogic(speed);
@@ -83,80 +70,97 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
           newLocation.longitude!,
         );
 
-        // Filter out random GPS jumps <3m
         if (distance > 3.0) {
-          setState(() {
-            _distanceCovered += distance;
-          });
+          setState(() => _distanceCovered += distance);
         }
       }
 
-      // Update current location after distance check
-      setState(() {
-        _currentLocation = newLocation;
-      });
+      setState(() => _currentLocation = newLocation);
     });
   }
 
-  /// Simple auto-pause logic based on speed
-  /// If speed < _pauseThreshold for 5 consecutive seconds => autoPause
-  /// If speed > _resumeThreshold => autoResume immediately
   void _handleAutoPauseLogic(double speed) {
     if (_autoPaused) {
-      // Attempt to resume if speed is above the resume threshold
       if (speed > _resumeThreshold) {
         setState(() {
           _autoPaused = false;
-          _stillCounter = 0; // reset
+          _stillCounter = 0;
         });
       }
     } else {
-      // If not paused, check if speed is below pause threshold
       if (speed < _pauseThreshold) {
         _stillCounter++;
         if (_stillCounter >= 5) {
-          // 5 consecutive seconds => pause
-          setState(() {
-            _autoPaused = true;
-          });
+          setState(() => _autoPaused = true);
         }
       } else {
-        // Speed above threshold => keep active
         _stillCounter = 0;
       }
     }
   }
 
-  /// Calculate distance in meters (Haversine formula)
-  double _calculateDistance(double startLat, double startLng,
-      double endLat, double endLng) {
-    const earthRadius = 6371000.0; // in meters
+  double _calculateDistance(double startLat, double startLng, double endLat, double endLng) {
+    const earthRadius = 6371000.0;
     final dLat = (endLat - startLat) * (pi / 180);
     final dLng = (endLng - startLng) * (pi / 180);
-
     final a = sin(dLat / 2) * sin(dLat / 2) +
         cos(startLat * (pi / 180)) *
             cos(endLat * (pi / 180)) *
             sin(dLng / 2) *
             sin(dLng / 2);
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-
     return earthRadius * c;
   }
 
   void _endRun() {
     _timer?.cancel();
     _timer = null;
-
-    setState(() {
-      _isTracking = false;
-    });
+    setState(() => _isTracking = false);
     _saveRunData();
   }
 
   Future<void> _saveRunData() async {
-    debugPrint("Run ended. Distance covered: $_distanceCovered meters");
-    // TODO: Implement backend logic (Supabase) if needed
+    debugPrint("Run ended. Distance: $_distanceCovered meters");
+
+    try {
+      final user = Provider.of<UserModel>(context, listen: false);
+      if (user.id == 0 || _startLocation == null) {
+        debugPrint("Missing required data for saving");
+        return;
+      }
+
+      final distance = double.parse(_distanceCovered.toStringAsFixed(2));
+      final startTime = DateTime.fromMillisecondsSinceEpoch(
+          _startLocation!.time!.toInt()
+      ).toUtc().toIso8601String();
+
+      final response = await http.post(
+        Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
+        },
+        body: jsonEncode({
+          'team_challenge_id': 1,
+          'user_id': user.id,
+          'start_time': startTime,
+          'start_latitude': _startLocation!.latitude,
+          'start_longitude': _startLocation!.longitude,
+          'distance_covered': distance,
+          'active': false,
+        }),
+      );
+
+      if (response.statusCode == 201) {
+        debugPrint("Successfully saved run data");
+        debugPrint("Server response: ${response.body}");
+      } else {
+        debugPrint("Failed to save run: ${response.statusCode}");
+        debugPrint("Error details: ${response.body}");
+      }
+    } catch (e) {
+      debugPrint("Error saving run data: ${e.toString()}");
+    }
   }
 
   String _formatTime(int seconds) {
@@ -165,9 +169,26 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
+  void _showLocationError() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Enable location services to track your run"),
+        duration: Duration(seconds: 5),
+      ),
+    );
+    Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final distanceKm = _distanceCovered / 1000;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Active Run'),
@@ -176,22 +197,31 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Time & Distance
-            Text('Time Elapsed: ${_formatTime(_secondsElapsed)}'),
-            Text('Distance Covered: ${distanceKm.toStringAsFixed(2)} km'),
-            // AutoPaused status
+            Text(
+              'Time Elapsed: ${_formatTime(_secondsElapsed)}',
+              style: const TextStyle(fontSize: 20),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Distance Covered: ${distanceKm.toStringAsFixed(2)} km',
+              style: const TextStyle(fontSize: 20),
+            ),
             const SizedBox(height: 8),
             if (_autoPaused)
               const Text(
                 'Auto-Paused',
                 style: TextStyle(color: Colors.red, fontSize: 16),
               ),
-            const SizedBox(height: 16),
-
-            // End Run button
+            const SizedBox(height: 24),
             ElevatedButton(
               onPressed: _endRun,
-              child: const Text('End Run'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              ),
+              child: const Text(
+                'End Run',
+                style: TextStyle(fontSize: 18),
+              ),
             ),
           ],
         ),
