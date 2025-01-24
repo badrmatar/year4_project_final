@@ -20,6 +20,8 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   final LocationService _locationService = LocationService();
   LocationData? _startLocation;
   LocationData? _currentLocation;
+  LocationData? _endLocation;
+
   double _distanceCovered = 0.0;
   int _secondsElapsed = 0;
   Timer? _timer;
@@ -113,9 +115,21 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   }
 
   void _endRun() {
+    // Stop the timer
     _timer?.cancel();
     _timer = null;
+
+    // Capture the current location as the end location
+    if (_currentLocation != null) {
+      setState(() {
+        _endLocation = _currentLocation;
+      });
+    }
+
+    // Set tracking to false
     setState(() => _isTracking = false);
+
+    // Now save run data
     _saveRunData();
   }
 
@@ -129,10 +143,22 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         return;
       }
 
+      // We also need to ensure _endLocation is not null.
+      if (_endLocation == null) {
+        debugPrint("No end location found. Using last known location or fallback...");
+        // Optional fallback: _endLocation = _currentLocation;
+        // Or just return if you cannot proceed.
+      }
+
       final distance = double.parse(_distanceCovered.toStringAsFixed(2));
       final startTime = DateTime.fromMillisecondsSinceEpoch(
           _startLocation!.time!.toInt()
       ).toUtc().toIso8601String();
+
+      // If you also want an endTime from the device, do similarly:
+      final endTime = _endLocation?.time == null
+          ? DateTime.now().toUtc().toIso8601String()
+          : DateTime.fromMillisecondsSinceEpoch(_endLocation!.time!.toInt()).toUtc().toIso8601String();
 
       final response = await http.post(
         Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
@@ -144,8 +170,11 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
           'team_challenge_id': 1,
           'user_id': user.id,
           'start_time': startTime,
+          'end_time': endTime,                  // if your function requires it
           'start_latitude': _startLocation!.latitude,
           'start_longitude': _startLocation!.longitude,
+          'end_latitude': _endLocation?.latitude,    // <--- use _endLocation
+          'end_longitude': _endLocation?.longitude,  // <--- use _endLocation
           'distance_covered': distance,
           'active': false,
         }),
@@ -162,6 +191,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
       debugPrint("Error saving run data: ${e.toString()}");
     }
   }
+
 
   String _formatTime(int seconds) {
     final minutes = seconds ~/ 60;
