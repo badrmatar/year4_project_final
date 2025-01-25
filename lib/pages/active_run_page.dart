@@ -21,7 +21,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   LocationData? _startLocation;
   LocationData? _currentLocation;
   LocationData? _endLocation;
-
   double _distanceCovered = 0.0;
   int _secondsElapsed = 0;
   Timer? _timer;
@@ -115,21 +114,18 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   }
 
   void _endRun() {
-    // Stop the timer
-    _timer?.cancel();
-    _timer = null;
-
-    // Capture the current location as the end location
-    if (_currentLocation != null) {
-      setState(() {
-        _endLocation = _currentLocation;
-      });
+    if (_currentLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot end run without valid location')),
+      );
+      return;
     }
 
-    // Set tracking to false
-    setState(() => _isTracking = false);
-
-    // Now save run data
+    _timer?.cancel();
+    setState(() {
+      _endLocation = _currentLocation;
+      _isTracking = false;
+    });
     _saveRunData();
   }
 
@@ -138,57 +134,76 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
 
     try {
       final user = Provider.of<UserModel>(context, listen: false);
-      if (user.id == 0 || _startLocation == null) {
+
+      // Debug print all relevant data
+      debugPrint("Debug -> user.id = ${user.id}");
+      debugPrint("Debug -> _startLocation = $_startLocation");
+      debugPrint("Debug -> _endLocation = $_endLocation");
+
+      // Validate required data
+      if (user.id == 0 || _startLocation == null || _endLocation == null) {
         debugPrint("Missing required data for saving");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Missing required data to save run")),
+        );
         return;
       }
 
-      // We also need to ensure _endLocation is not null.
-      if (_endLocation == null) {
-        debugPrint("No end location found. Using last known location or fallback...");
-        // Optional fallback: _endLocation = _currentLocation;
-        // Or just return if you cannot proceed.
-      }
-
+      // Convert distance to a fixed decimal precision
       final distance = double.parse(_distanceCovered.toStringAsFixed(2));
+
+      // Convert timestamps to ISO 8601 format
       final startTime = DateTime.fromMillisecondsSinceEpoch(
-          _startLocation!.time!.toInt()
+        _startLocation!.time!.toInt(),
       ).toUtc().toIso8601String();
 
-      // If you also want an endTime from the device, do similarly:
-      final endTime = _endLocation?.time == null
-          ? DateTime.now().toUtc().toIso8601String()
-          : DateTime.fromMillisecondsSinceEpoch(_endLocation!.time!.toInt()).toUtc().toIso8601String();
+      final endTime = DateTime.fromMillisecondsSinceEpoch(
+        _endLocation!.time!.toInt(),
+      ).toUtc().toIso8601String();
 
+      // Prepare the request body
+      final requestBody = jsonEncode({
+        'user_id': user.id,
+        'start_time': startTime,
+        'end_time': endTime,
+        'start_latitude': _startLocation!.latitude,
+        'start_longitude': _startLocation!.longitude,
+        'end_latitude': _endLocation!.latitude,
+        'end_longitude': _endLocation!.longitude,
+        'distance_covered': distance,
+      });
+
+      debugPrint("Saving run data with body: $requestBody");
+
+      // Make the HTTP request to save the run data
       final response = await http.post(
         Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
         },
-        body: jsonEncode({
-          'team_challenge_id': 1,
-          'user_id': user.id,
-          'start_time': startTime,
-          'end_time': endTime,                  // if your function requires it
-          'start_latitude': _startLocation!.latitude,
-          'start_longitude': _startLocation!.longitude,
-          'end_latitude': _endLocation?.latitude,    // <--- use _endLocation
-          'end_longitude': _endLocation?.longitude,  // <--- use _endLocation
-          'distance_covered': distance,
-          'active': false,
-        }),
+        body: requestBody,
       );
 
+      // Handle the response
       if (response.statusCode == 201) {
         debugPrint("Successfully saved run data");
         debugPrint("Server response: ${response.body}");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Run saved successfully!")),
+        );
       } else {
         debugPrint("Failed to save run: ${response.statusCode}");
         debugPrint("Error details: ${response.body}");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to save run: ${response.body}")),
+        );
       }
     } catch (e) {
       debugPrint("Error saving run data: ${e.toString()}");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("An error occurred: ${e.toString()}")),
+      );
     }
   }
 
@@ -220,9 +235,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     final distanceKm = _distanceCovered / 1000;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Active Run'),
-      ),
+      appBar: AppBar(title: const Text('Active Run')),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
