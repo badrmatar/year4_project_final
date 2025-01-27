@@ -156,18 +156,27 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
             itemCount: _leagueTeams.length,
             itemBuilder: (context, index) {
               final team = _leagueTeams[index];
-              final members = team['members'] as List<dynamic>;
+              final members = List<Map<String, dynamic>>.from(team['members'] ?? []);
 
-              return ListTile(
-                title: Text(
-                  "Team: ${team['team_name']}",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: members.map<Widget>((member) {
-                    return Text("- ${member['name']} (ID: ${member['user_id']})");
-                  }).toList(),
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ListTile(
+                  title: Text(
+                    "Team: ${team['team_name']} (ID: ${team['team_id']})",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: members.map<Widget>((member) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          "• ${member['name']} (ID: ${member['user_id']})",
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
               );
             },
