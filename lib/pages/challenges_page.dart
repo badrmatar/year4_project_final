@@ -23,6 +23,27 @@ class _ChallengesPageState extends State<ChallengesPage> {
     _challengesData = _fetchChallengesAndTeamStatus();
   }
 
+  String _getTimeRemaining(DateTime startTime, int? duration) {
+    if (duration == null) return 'N/A';
+
+    final endTime = startTime.add(Duration(minutes: duration));
+    final now = DateTime.now().toUtc();
+
+    if (now.isAfter(endTime)) {
+      return 'Expired';
+    }
+
+    final remaining = endTime.difference(now);
+    final hours = remaining.inHours;
+    final minutes = remaining.inMinutes % 60;
+
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    } else {
+      return '${minutes}m';
+    }
+  }
+
   Future<Map<String, dynamic>> _fetchChallengesAndTeamStatus() async {
     final supabase = Supabase.instance.client;
     final user = Provider.of<UserModel>(context, listen: false);
@@ -192,11 +213,35 @@ class _ChallengesPageState extends State<ChallengesPage> {
                         ),
                     ],
                   ),
-                  subtitle: Text(
-                    'Difficulty: ${challenge.difficulty}\n'
-                        'Points: ${challenge.earningPoints}\n'
-                        'Start: ${challenge.startTime}\n'
-                        'Duration: ${challenge.duration} mins',
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: challenge.difficulty.toLowerCase() == 'easy'
+                              ? Colors.lightBlue.shade100
+                              : challenge.difficulty.toLowerCase() == 'medium'
+                              ? Colors.yellow.shade100
+                              : Colors.orange.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Difficulty: ${challenge.difficulty}',
+                          style: TextStyle(
+                            color: challenge.difficulty.toLowerCase() == 'easy'
+                                ? Colors.blue.shade900
+                                : challenge.difficulty.toLowerCase() == 'medium'
+                                ? Colors.yellow.shade900
+                                : Colors.orange.shade900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('Points: ${challenge.earningPoints}'),
+                      Text('Time Remaining: ${_getTimeRemaining(challenge.startTime, challenge.duration)}'),
+                      Text(challenge.formattedDistance),
+                    ],
                   ),
                   trailing: ElevatedButton(
                     onPressed: activeTeamChallenge != null && !isActiveChallenge

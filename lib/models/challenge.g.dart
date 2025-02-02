@@ -12,7 +12,7 @@ Challenge _$ChallengeFromJson(Map<String, dynamic> json) => Challenge(
       duration: (json['duration'] as num?)?.toInt(),
       earningPoints: (json['earning_points'] as num?)?.toInt(),
       difficulty: json['difficulty'] as String,
-      length: (json['length'] as num?)?.toInt(),
+      length: (json['length'] as num?)?.toDouble(),
     );
 
 Map<String, dynamic> _$ChallengeToJson(Challenge instance) => <String, dynamic>{

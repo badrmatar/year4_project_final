@@ -2,17 +2,34 @@ import 'package:location/location.dart';
 
 class LocationService {
   final Location _location = Location();
+  LocationData? _lastKnownLocation;
+  Stream<LocationData>? _locationStream;
 
   // Configure location settings in the constructor
   LocationService() {
+    _initializeLocation();
+  }
+
+  Future<void> _initializeLocation() async {
     // Request high accuracy and set a minimum distance filter (in meters)
-    _location.changeSettings(
+    await _location.changeSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 5,
     );
+
+    // Start tracking location immediately
+    _locationStream = _location.onLocationChanged;
+    _locationStream?.listen((LocationData location) {
+      _lastKnownLocation = location;
+    });
   }
 
   Future<LocationData?> getCurrentLocation() async {
+    // If we already have a location, return it immediately
+    if (_lastKnownLocation != null) {
+      return _lastKnownLocation;
+    }
+
     // Check permissions
     PermissionStatus permissionGranted = await _location.hasPermission();
     if (permissionGranted == PermissionStatus.denied) {
@@ -32,11 +49,17 @@ class LocationService {
     }
 
     // Get current location
-    return await _location.getLocation();
+    _lastKnownLocation = await _location.getLocation();
+    return _lastKnownLocation;
+  }
+
+  // Get last known location without waiting
+  LocationData? getLastLocation() {
+    return _lastKnownLocation;
   }
 
   // Continuous location tracking stream
   Stream<LocationData> trackLocation() {
-    return _location.onLocationChanged;
+    return _locationStream ?? _location.onLocationChanged;
   }
 }

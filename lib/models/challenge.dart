@@ -17,7 +17,7 @@ class Challenge {
 
   final String difficulty; // Required if non-NULL in DB
 
-  final int? length; // Optional if DB allows NULL for `length`
+  final double? length; // Changed from int? to double? for kilometer distances
 
   Challenge({
     required this.challengeId,
@@ -27,6 +27,12 @@ class Challenge {
     required this.difficulty,
     this.length,
   });
+
+  // Add a getter for formatted distance
+  String get formattedDistance {
+    if (length == null) return 'Distance: N/A';
+    return 'Distance: ${length?.toStringAsFixed(1)} km';
+  }
 
   // Factory constructor to parse JSON into the `Challenge` object
   factory Challenge.fromJson(Map<String, dynamic> json) =>

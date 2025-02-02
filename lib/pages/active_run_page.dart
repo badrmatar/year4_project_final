@@ -29,20 +29,38 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   int _stillCounter = 0;
   final double _pauseThreshold = 0.5;
   final double _resumeThreshold = 1.0;
+  bool _isInitializing = true;
+  StreamSubscription<LocationData>? _locationSubscription;
 
   @override
   void initState() {
     super.initState();
-    _startRun();
+    _initializeRun();
   }
 
-  void _startRun() async {
-    final location = await _locationService.getCurrentLocation();
-    if (location == null) {
-      _showLocationError();
-      return;
-    }
+  Future<void> _initializeRun() async {
+    // Start location tracking immediately
+    _locationSubscription = _locationService.trackLocation().listen((newLocation) {
+      if (mounted) {
+        setState(() => _currentLocation = newLocation);
+        if (_isInitializing && newLocation.accuracy != null && newLocation.accuracy! < 20) {
+          // Once we have a good accuracy, start the run
+          _isInitializing = false;
+          _startRun(newLocation);
+        }
+      }
+    });
 
+    // Fallback timer in case GPS takes too long
+    Timer(const Duration(seconds: 30), () {
+      if (_isInitializing && mounted && _currentLocation != null) {
+        _isInitializing = false;
+        _startRun(_currentLocation!);
+      }
+    });
+  }
+
+  void _startRun(LocationData location) {
     setState(() {
       _startLocation = location;
       _isTracking = true;
@@ -52,7 +70,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     });
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_autoPaused) {
+      if (!_autoPaused && mounted) {
         setState(() => _secondsElapsed++);
       }
     });
@@ -135,12 +153,10 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     try {
       final user = Provider.of<UserModel>(context, listen: false);
 
-      // Debug print all relevant data
       debugPrint("Debug -> user.id = ${user.id}");
       debugPrint("Debug -> _startLocation = $_startLocation");
       debugPrint("Debug -> _endLocation = $_endLocation");
 
-      // Validate required data
       if (user.id == 0 || _startLocation == null || _endLocation == null) {
         debugPrint("Missing required data for saving");
         ScaffoldMessenger.of(context).showSnackBar(
@@ -149,10 +165,8 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         return;
       }
 
-      // Convert distance to a fixed decimal precision
       final distance = double.parse(_distanceCovered.toStringAsFixed(2));
 
-      // Convert timestamps to ISO 8601 format
       final startTime = DateTime.fromMillisecondsSinceEpoch(
         _startLocation!.time!.toInt(),
       ).toUtc().toIso8601String();
@@ -161,7 +175,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         _endLocation!.time!.toInt(),
       ).toUtc().toIso8601String();
 
-      // Prepare the request body
       final requestBody = jsonEncode({
         'user_id': user.id,
         'start_time': startTime,
@@ -175,7 +188,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
 
       debugPrint("Saving run data with body: $requestBody");
 
-      // Make the HTTP request to save the run data
       final response = await http.post(
         Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
         headers: {
@@ -185,7 +197,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         body: requestBody,
       );
 
-      // Handle the response
       if (response.statusCode == 201) {
         debugPrint("Successfully saved run data");
         debugPrint("Server response: ${response.body}");
@@ -207,7 +218,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     }
   }
 
-
   String _formatTime(int seconds) {
     final minutes = seconds ~/ 60;
     final remainingSeconds = seconds % 60;
@@ -227,12 +237,48 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _locationSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final distanceKm = _distanceCovered / 1000;
+
+    if (_isInitializing) {
+      return Scaffold(
+        body: Container(
+          color: Colors.black87,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'Waiting for GPS signal...',
+                  style: TextStyle(
+                    fontSize: 24,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                CircularProgressIndicator(
+                  color: _currentLocation != null ? Colors.green : Colors.white,
+                ),
+                if (_currentLocation != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0),
+                    child: Text(
+                      'Accuracy: ${_currentLocation!.accuracy?.toStringAsFixed(1) ?? "Unknown"} meters',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Active Run')),
