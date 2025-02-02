@@ -8,7 +8,7 @@ const supabase = createClient(
 
 serve(async (req) => {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
       headers: { 'Content-Type': 'application/json' }
     });
@@ -16,43 +16,45 @@ serve(async (req) => {
 
   try {
     const { league_room_id } = await req.json();
-    console.log('Processing request for league_room_id:', league_room_id);
 
-    const { data, error } = await supabase
+    // First get the earliest waiting room entry for this league room
+    const { data: waitingRoomData, error: waitingRoomError } = await supabase
+      .from('waiting_rooms')
+      .select('user_id, created_at')
+      .eq('league_room_id', league_room_id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (waitingRoomError) throw waitingRoomError;
+
+    const ownerUserId = waitingRoomData.user_id;
+
+    // Then get the teams data
+    const { data: teamsData, error: teamsError } = await supabase
       .from('teams')
       .select(`
         team_id,
         team_name,
-        team_memberships (
+        members:team_memberships(
           user_id,
-          user:users (
-            name
-          )
+          users(name)
         )
       `)
       .eq('league_room_id', league_room_id);
 
-    if (error) throw error;
+    if (teamsError) throw teamsError;
 
-    // Transform the data to match the expected format
-    const transformedData = data.map(team => ({
-      team_name: team.team_name,
-      team_id: team.team_id,
-      members: team.team_memberships.map(membership => ({
-        name: membership.user.name,
-        user_id: membership.user_id
-      }))
-    }));
-
-    console.log('Sending response:', transformedData);
-
-    return new Response(JSON.stringify(transformedData), {
+    // Return both the teams data and the owner ID
+    return new Response(JSON.stringify({
+      teams: teamsData,
+      owner_id: ownerUserId
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
-    console.error('Error:', error.message);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }

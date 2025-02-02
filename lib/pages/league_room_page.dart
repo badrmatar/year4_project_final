@@ -17,6 +17,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
   int? _leagueRoomId;
   String? _leagueRoomName;
   List<Map<String, dynamic>> _leagueTeams = [];
+  int? _ownerId;  // Track the owner ID
 
   @override
   void initState() {
@@ -51,15 +52,16 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     } catch (e) {
       setState(() => _isLoading = false);
       print('Debug: Exception in _fetchLeagueRoomData: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error fetching league room data: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error fetching league room data: $e')),
+        );
+      }
     }
   }
 
   Future<int?> _getLeagueRoomId(int userId) async {
-    final url =
-        'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/get_active_league_room_id';
+    final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/get_active_league_room_id';
 
     final headers = {
       'Content-Type': 'application/json',
@@ -88,8 +90,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
   }
 
   Future<List<Map<String, dynamic>>> _fetchLeagueTeams(int leagueRoomId) async {
-    final url =
-        'https://ywhjlgvtjywhacgqtzqh.supabase.co/functions/v1/get_league_teams'; // Fixed typo here
+    final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/get_league_teams';
 
     final headers = {
       'Content-Type': 'application/json',
@@ -108,8 +109,9 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
       print('Debug: Response body: ${response.body}');
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as List<dynamic>;
-        return List<Map<String, dynamic>>.from(data);
+        final data = jsonDecode(response.body);
+        _ownerId = data['owner_id'] as int;  // Store the owner ID
+        return List<Map<String, dynamic>>.from(data['teams']);
       } else {
         print('Error fetching league teams: ${response.body}');
         return [];
@@ -117,6 +119,53 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     } catch (e) {
       print('Exception in _fetchLeagueTeams: $e');
       return [];
+    }
+  }
+
+  Future<void> _handleEndLeague() async {
+    if (_leagueRoomId == null) return;
+
+    setState(() => _isLoading = true);
+
+    final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/end_league_room';
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
+        },
+        body: jsonEncode({
+          'league_room_id': _leagueRoomId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('League ended successfully!')),
+          );
+          Navigator.pushReplacementNamed(context, '/home');
+        }
+      } else {
+        final errorData = jsonDecode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errorData['error'] ?? 'Failed to end league')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error ending league: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -129,17 +178,25 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _leagueRoomId == null
-          ? Center(
-        child: Text(
-          "No active league room found.",
-          style: const TextStyle(fontSize: 18),
-        ),
-      )
+          ? const Center(
+          child: Text(
+            "No active league room found.",
+            style: TextStyle(fontSize: 18),
+          ))
           : _buildLeagueRoomDetails(),
     );
   }
 
   Widget _buildLeagueRoomDetails() {
+    print('Building league room details');
+    print('League teams: $_leagueTeams');
+    print('Owner ID: $_ownerId');
+    print('Current user ID: ${widget.userId}');
+
+    // Check if current user is the owner (first person from waiting room)
+    final bool isOwner = _ownerId == widget.userId;
+    print('Is owner: $isOwner');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -182,6 +239,25 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
             },
           ),
         ),
+        // Show End League button if current user is the owner
+        if (isOwner)
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Center(
+              child: ElevatedButton(
+                onPressed: _handleEndLeague,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  minimumSize: const Size(200, 50),
+                ),
+                child: const Text(
+                  'End League',
+                  style: TextStyle(fontSize: 18, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

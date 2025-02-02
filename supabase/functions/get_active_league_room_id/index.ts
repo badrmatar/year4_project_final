@@ -47,7 +47,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1) Confirm the user exists (optional, but recommended)
+    // Confirm the user exists
     const { data: existingUser, error: userError } = await supabase
       .from('users')
       .select('user_id')
@@ -69,72 +69,60 @@ serve(async (req) => {
       );
     }
 
-    // 2) Calculate timestamp for 7 days ago
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    // 3) We want to find a record in "waiting_rooms" where:
-    //    - user_id = {userId}
-    //    - league_room_id is NOT null
-    //    - league_rooms.created_at >= sevenDaysAgo (means league room is active)
-    //
-    //    We'll join "league_rooms" in the select to filter on created_at.
-
-    const { data: activeRecord, error: fetchError } = await supabase
+    // Get the most recent waiting room for this user that has a league_room_id
+    const { data: waitingRoomData, error: waitingRoomError } = await supabase
       .from('waiting_rooms')
       .select(`
         waiting_room_id,
         league_room_id,
         league_rooms (
           league_room_id,
-          created_at
+          created_at,
+          ended_at
         )
       `)
       .eq('user_id', userId)
-      .not('league_room_id', 'is', null)         // league_room_id != NULL
-      .gte('league_rooms.created_at', sevenDaysAgo) // within the last 7 days
+      .not('league_room_id', 'is', null)
+      .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle();
+      .single();
 
-    if (fetchError) {
-      console.error(`Supabase error while fetching active league room: ${fetchError.message}`);
-      return new Response(JSON.stringify({ error: fetchError.message }), {
-        status: 400,
+    if (waitingRoomError?.code === 'PGRST116') {
+      // No waiting room found - this is okay
+      return new Response(JSON.stringify({
+        message: 'No active league room found.',
+        league_room_id: null
+      }), { status: 200 });
+    }
+
+    if (waitingRoomError) {
+      return new Response(JSON.stringify({ error: waitingRoomError.message }), {
+        status: 400
       });
     }
 
-    // 4) Check if anything was found
-    if (!activeRecord) {
-      // No active league room found
-      const noRoomResponse = {
-        message: 'No active league room found for this user within the last 7 days.',
-        league_room_id: null,
-      };
-      console.log(`Response: ${JSON.stringify(noRoomResponse)}`);
-      return new Response(JSON.stringify(noRoomResponse), {
-        headers: { 'Content-Type': 'application/json' },
-        status: 200,
-      });
+    // Check if the league has ended
+    if (waitingRoomData.league_rooms.ended_at !== null) {
+      return new Response(JSON.stringify({
+        message: 'No active league room found.',
+        league_room_id: null
+      }), { status: 200 });
     }
 
-    // 5) Return the found league_room_id + waiting_room_id
-    const successResponse = {
+    // Return the league room ID
+    return new Response(JSON.stringify({
       message: 'Active league room found.',
-      waiting_room_id: activeRecord.waiting_room_id,
-      league_room_id: activeRecord.league_room_id,
-      created_at: activeRecord.league_rooms.created_at,
-    };
-    console.log(`Response: ${JSON.stringify(successResponse)}`);
-
-    return new Response(JSON.stringify(successResponse), {
-      headers: { 'Content-Type': 'application/json' },
+      league_room_id: waitingRoomData.league_room_id,
+      waiting_room_id: waitingRoomData.waiting_room_id,
+      created_at: waitingRoomData.league_rooms.created_at,
+    }), {
       status: 200,
+      headers: { 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
     console.error('Unexpected error:', error);
 
-    // Differentiate between dev/production for error detail
     const environment = Deno.env.get('ENVIRONMENT') || 'production';
     const isDevelopment = environment === 'development';
     let errorMessage = 'Internal Server Error';

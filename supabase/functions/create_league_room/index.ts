@@ -1,7 +1,6 @@
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Load environment variables
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -31,7 +30,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // Fetch waiting room
+    // First, check if the user has any unassigned waiting room entries
     const { data: waitingRoomRow, error: findWrError } = await supabase
       .from('waiting_rooms')
       .select('waiting_room_id')
@@ -48,7 +47,7 @@ serve(async (req: Request) => {
 
     const waiting_room_id = waitingRoomRow.waiting_room_id;
 
-    // Fetch users
+    // Fetch all users in this waiting room
     const { data: waitingUsers, error: waitingUsersError } = await supabase
       .from('waiting_rooms')
       .select('user_id')
@@ -93,7 +92,7 @@ serve(async (req: Request) => {
 
     const league_room_id = newLeagueRoom.league_room_id;
 
-    // Assign league_room_id to waiting room users
+    // Update waiting room entries for all users in this group
     const { error: updateError } = await supabase
       .from('waiting_rooms')
       .update({ league_room_id })
@@ -116,6 +115,7 @@ serve(async (req: Request) => {
       teams.push([shuffledUserIds[i], shuffledUserIds[i + 1]]);
     }
 
+    // Create teams sequentially
     for (const team of teams) {
       const { error: createTeamError } = await supabase.functions.invoke(
         'create_team',
