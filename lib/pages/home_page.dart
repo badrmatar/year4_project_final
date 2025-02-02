@@ -101,6 +101,12 @@ class _HomePageState extends State<HomePage> {
               },
               child: const Text('Go to League Room'),
             ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pushNamed(context, '/history');
+              },
+              child: const Text('View History'),
+            ),
           ],
         ),
       ),

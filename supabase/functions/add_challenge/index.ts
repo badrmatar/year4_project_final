@@ -26,11 +26,18 @@ serve(async (req: Request) => {
   const { start_time, duration, earning_points, difficulty, length } = body
 
   // Check required fields
-  if (!start_time || !duration || !earning_points || !difficulty || !length) {
-    return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-      status: 400,
-    })
-  }
+    if (
+      start_time == null ||
+      duration == null ||
+      earning_points == null ||
+      difficulty == null ||
+      length == null
+    ) {
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+        status: 400,
+      })
+    }
+
 
   // Insert into the challenges table
   const { data, error } = await supabase

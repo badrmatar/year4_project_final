@@ -11,7 +11,7 @@ import 'package:year4_project/pages/challenges_page.dart';
 import 'package:year4_project/pages/active_run_page.dart';
 import 'package:year4_project/pages/league_room_page.dart';
 import 'services/team_service.dart';
-
+import 'package:year4_project/pages/history_page.dart';
 Future<void> initSupabase() async {
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
@@ -55,6 +55,7 @@ class MyApp extends StatelessWidget {
         '/active_run': (context) => ActiveRunPage(),
         // NEW: Add LeagueRoomPage route
         '/league_room': (context) => LeagueRoomPage(userId: user.id),
+        '/history': (context) => const HistoryPage(),
       },
     );
   }
