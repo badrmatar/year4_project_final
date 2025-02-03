@@ -19,6 +19,7 @@ UserContribution _$UserContributionFromJson(Map<String, dynamic> json) =>
       endLongitude: (json['endLongitude'] as num).toDouble(),
       contributionDetails: json['contributionDetails'] as String?,
       pointsEarned: (json['pointsEarned'] as num).toInt(),
+      route: UserContribution._latLngListFromJson(json['route'] as List),
     );
 
 Map<String, dynamic> _$UserContributionToJson(UserContribution instance) =>
@@ -34,4 +35,5 @@ Map<String, dynamic> _$UserContributionToJson(UserContribution instance) =>
       'endLongitude': instance.endLongitude,
       'contributionDetails': instance.contributionDetails,
       'pointsEarned': instance.pointsEarned,
+      'route': UserContribution._latLngListToJson(instance.route),
     };

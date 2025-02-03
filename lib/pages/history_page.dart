@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/user.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'run_map_view.dart';  // Import the map view widget
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({Key? key}) : super(key: key);
@@ -50,7 +51,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
           ''')
           .eq('user_id', user.id);
 
-      // Fetch personal contributions
+      // Fetch personal contributions (including the new "route" field)
       final personalResponse = await supabase
           .from('user_contributions')
           .select('''
@@ -130,7 +131,8 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
         final contribution = _personalContributions[index];
         final challenge = contribution['team_challenges']?['challenges'];
         final startTime = DateTime.parse(contribution['start_time']);
-        final distance = contribution['distance_covered']?.toDouble() ?? 0.0;
+        final distance = (contribution['distance_covered'] as num?)?.toDouble() ?? 0.0;
+        final routeData = contribution['route']; // This field holds the saved route
 
         return Card(
           margin: const EdgeInsets.all(8.0),
@@ -146,6 +148,20 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
                 ],
               ],
             ),
+            trailing: (routeData != null)
+                ? ElevatedButton(
+              onPressed: () {
+                // Navigate to the RunMapView screen to display the saved route.
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RunMapView(routeData: routeData),
+                  ),
+                );
+              },
+              child: const Text('View Route'),
+            )
+                : null,
           ),
         );
       },

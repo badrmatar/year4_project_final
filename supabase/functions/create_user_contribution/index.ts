@@ -1,3 +1,4 @@
+// supabase/functions/create_user_contribution/index.ts
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -20,7 +21,7 @@ serve(async (req: Request) => {
     const body = await req.json();
     console.log('Received request body:', body);
 
-    // Validate input
+    // Validate input and extract fields including the new "route" field.
     const {
       user_id,
       start_time,
@@ -30,12 +31,15 @@ serve(async (req: Request) => {
       end_latitude,
       end_longitude,
       distance_covered,
+      route  // <-- New field expected as a JSON array of coordinate objects
     } = body;
 
     const validationErrors = [];
     if (typeof user_id !== 'number') validationErrors.push('user_id must be a number');
     if (typeof start_time !== 'string') validationErrors.push('start_time must be a string');
     if (typeof distance_covered !== 'number') validationErrors.push('distance_covered must be a number');
+    // Validate route is an array.
+    if (!Array.isArray(route)) validationErrors.push('route must be an array');
 
     if (validationErrors.length > 0) {
       return new Response(
@@ -83,7 +87,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Insert contribution
+    // Insert contribution (including the new "route" field)
     const { data: newContribution, error: insertError } = await supabase
       .from('user_contributions')
       .insert({
@@ -96,6 +100,7 @@ serve(async (req: Request) => {
         end_latitude,
         end_longitude,
         distance_covered,
+        route, // Save route as JSONB
         active: false,
         contribution_details: `Distance covered: ${distance_covered}m`
       })
@@ -110,7 +115,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Get all contributions for this challenge
+    // Get all contributions for this challenge to sum distances
     const { data: allContributions, error: sumError } = await supabase
       .from('user_contributions')
       .select('distance_covered')
