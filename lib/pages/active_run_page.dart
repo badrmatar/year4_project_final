@@ -147,6 +147,9 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     _saveRunData();
   }
 
+  // lib/pages/active_run_page.dart
+
+
   Future<void> _saveRunData() async {
     debugPrint("Run ended. Distance: $_distanceCovered meters");
 
@@ -159,9 +162,11 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
 
       if (user.id == 0 || _startLocation == null || _endLocation == null) {
         debugPrint("Missing required data for saving");
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Missing required data to save run")),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Missing required data to save run")),
+          );
+        }
         return;
       }
 
@@ -200,23 +205,104 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
       if (response.statusCode == 201) {
         debugPrint("Successfully saved run data");
         debugPrint("Server response: ${response.body}");
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Run saved successfully!")),
-        );
+
+        final responseData = jsonDecode(response.body);
+        final data = responseData['data'];
+
+        if (data != null) {
+          bool hasChallenge = false;
+
+          if (data['total_distance_km'] != null && data['required_distance_km'] != null) {
+            hasChallenge = true;
+            if (data['challenge_completed'] == true) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '🎉 Challenge Completed! 🎉',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Team Total: ${data['total_distance_km'].toStringAsFixed(2)} km',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ],
+                    ),
+                    duration: const Duration(seconds: 5),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            } else {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Run saved successfully!'),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Team Progress: ${data['total_distance_km'].toStringAsFixed(2)}/${data['required_distance_km']} km',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ],
+                    ),
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              }
+            }
+          } else {
+            // No challenge, just show simple success message
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Run saved successfully! Distance: ${(distance / 1000).toStringAsFixed(2)} km'),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+          }
+
+          // Only navigate to challenges page if there was a challenge
+          if (hasChallenge) {
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted) {
+                Navigator.pushReplacementNamed(context, '/challenges');
+              }
+            });
+          }
+        }
       } else {
         debugPrint("Failed to save run: ${response.statusCode}");
         debugPrint("Error details: ${response.body}");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Failed to save run: ${response.body}")),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed to save run: ${response.body}")),
+          );
+        }
       }
     } catch (e) {
       debugPrint("Error saving run data: ${e.toString()}");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("An error occurred: ${e.toString()}")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("An error occurred: ${e.toString()}")),
+        );
+      }
     }
   }
+
+
 
   String _formatTime(int seconds) {
     final minutes = seconds ~/ 60;

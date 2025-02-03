@@ -1,7 +1,6 @@
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// --- Configure your Supabase client ---
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
@@ -164,12 +163,67 @@ serve(async (req: Request) => {
       );
     }
 
-    // Return success with team_challenge_id
+    // Get challenge details and total team distance
+    const { data: challengeData, error: challengeError2 } = await supabase
+      .from('team_challenges')
+      .select(`
+        challenge_id,
+        challenges (length),
+        user_contributions (distance_covered)
+      `)
+      .eq('team_challenge_id', team_challenge_id)
+      .single();
+
+    if (challengeError2) {
+      return new Response(
+        JSON.stringify({
+          error: 'Error getting challenge details',
+          details: challengeError2.message,
+        }),
+        { status: 500 }
+      );
+    }
+
+    // Calculate total distance covered by the team
+    const contributions = challengeData.user_contributions || [];
+    const totalDistanceInMeters = contributions.reduce(
+      (sum: number, contrib: any) => sum + (contrib.distance_covered || 0),
+      0
+    );
+    const totalDistanceInKm = totalDistanceInMeters / 1000;
+
+    // Check if challenge distance has been met
+    const requiredDistance = challengeData.challenges.length;
+    let challengeCompleted = false;
+
+    if (totalDistanceInKm >= requiredDistance) {
+      // Update team_challenge as completed
+      const { error: updateError } = await supabase
+        .from('team_challenges')
+        .update({ iscompleted: true })
+        .eq('team_challenge_id', team_challenge_id);
+
+      if (updateError) {
+        return new Response(
+          JSON.stringify({
+            error: 'Error updating challenge completion status',
+            details: updateError.message,
+          }),
+          { status: 500 }
+        );
+      }
+      challengeCompleted = true;
+    }
+
+    // Return success with team_challenge_id and completion status
     return new Response(
       JSON.stringify({
         data: {
           ...contributionData,
-          team_challenge_id
+          team_challenge_id,
+          challenge_completed: challengeCompleted,
+          total_distance_km: totalDistanceInKm,
+          required_distance_km: requiredDistance
         }
       }),
       {
@@ -177,6 +231,7 @@ serve(async (req: Request) => {
         headers: { 'Content-Type': 'application/json' },
       },
     );
+
   } catch (err) {
     console.error('Unexpected error:', err);
     return new Response(

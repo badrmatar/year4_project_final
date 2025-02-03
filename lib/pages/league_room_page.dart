@@ -1,3 +1,5 @@
+// lib/pages/league_room_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -17,12 +19,19 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
   int? _leagueRoomId;
   String? _leagueRoomName;
   List<Map<String, dynamic>> _leagueTeams = [];
-  int? _ownerId;  // Track the owner ID
+  int? _ownerId;
 
   @override
   void initState() {
     super.initState();
     _fetchLeagueRoomData();
+  }
+
+  /// Helper function to remove trailing digits (and any preceding spaces)
+  String _getCleanTeamName(String teamName) {
+    final regex = RegExp(r'^(.*?)(?:\s*\d+)?$');
+    final match = regex.firstMatch(teamName);
+    return match != null ? match.group(1)?.trim() ?? teamName : teamName;
   }
 
   Future<void> _fetchLeagueRoomData() async {
@@ -41,14 +50,68 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
       }
 
       print('Debug: Found league room ID: $leagueRoomId');
-      final teams = await _fetchLeagueTeams(leagueRoomId);
 
-      setState(() {
-        _leagueRoomId = leagueRoomId;
-        _leagueRoomName = "League Room $leagueRoomId";
-        _leagueTeams = teams;
-        _isLoading = false;
-      });
+      // Get team points
+      final pointsResponse = await http.post(
+        Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/get_team_points'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
+        },
+        body: jsonEncode({'league_room_id': leagueRoomId}),
+      );
+
+      // Get team members
+      final membersResponse = await http.post(
+        Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/get_league_teams'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
+        },
+        body: jsonEncode({'league_room_id': leagueRoomId}),
+      );
+
+      print('Points response: ${pointsResponse.body}');
+      print('Members response: ${membersResponse.body}');
+
+      if (pointsResponse.statusCode == 200 && membersResponse.statusCode == 200) {
+        final pointsData = jsonDecode(pointsResponse.body);
+        final membersData = jsonDecode(membersResponse.body);
+
+        print('Points data: $pointsData');
+        print('Members data: $membersData');
+
+        // Get teams data from both responses
+        final pointsList = List<Map<String, dynamic>>.from(pointsData['data'] ?? []);
+        final membersList = List<Map<String, dynamic>>.from(membersData['teams'] ?? []);
+
+        // Combine the data
+        final List<Map<String, dynamic>> teamsWithPoints = pointsList.map((pointsTeam) {
+          // Find matching team in members data
+          final memberTeam = membersList.firstWhere(
+                (memberTeam) => memberTeam['team_id'] == pointsTeam['team_id'],
+            orElse: () => {'members': []},
+          );
+
+          return {
+            ...pointsTeam,
+            'members': memberTeam['members'] ?? [],
+          };
+        }).toList();
+
+        setState(() {
+          _leagueRoomId = leagueRoomId;
+          _leagueRoomName = "League Room $leagueRoomId";
+          _leagueTeams = teamsWithPoints;
+          _isLoading = false;
+          _ownerId = membersData['owner_id'];
+        });
+      } else {
+        print('Error in responses:');
+        print('Points status: ${pointsResponse.statusCode}');
+        print('Members status: ${membersResponse.statusCode}');
+        throw Exception('Failed to fetch team data');
+      }
     } catch (e) {
       setState(() => _isLoading = false);
       print('Debug: Exception in _fetchLeagueRoomData: $e');
@@ -77,7 +140,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('Debug: API response: $data');
+        print('Debug: League room response: $data');
         return data['league_room_id'] as int?;
       } else {
         print('Error: API returned ${response.statusCode} - ${response.body}');
@@ -86,39 +149,6 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     } catch (e) {
       print('Exception in _getLeagueRoomId: $e');
       return null;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchLeagueTeams(int leagueRoomId) async {
-    final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/get_league_teams';
-
-    final headers = {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']!}',
-    };
-
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: headers,
-        body: jsonEncode({'league_room_id': leagueRoomId}),
-      );
-
-      print('Debug: Fetching teams for league room $leagueRoomId');
-      print('Debug: Response status: ${response.statusCode}');
-      print('Debug: Response body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        _ownerId = data['owner_id'] as int;  // Store the owner ID
-        return List<Map<String, dynamic>>.from(data['teams']);
-      } else {
-        print('Error fetching league teams: ${response.body}');
-        return [];
-      }
-    } catch (e) {
-      print('Exception in _fetchLeagueTeams: $e');
-      return [];
     }
   }
 
@@ -188,72 +218,184 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
   }
 
   Widget _buildLeagueRoomDetails() {
-    print('Building league room details');
-    print('League teams: $_leagueTeams');
-    print('Owner ID: $_ownerId');
-    print('Current user ID: ${widget.userId}');
-
-    // Check if current user is the owner (first person from waiting room)
+    // Determine if the current user is the league owner.
     final bool isOwner = _ownerId == widget.userId;
-    print('Is owner: $isOwner');
+    // Sort teams by total points in descending order.
+    _leagueTeams.sort((a, b) => (b['total_points'] ?? 0).compareTo(a['total_points'] ?? 0));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // League room title
         Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(12.0),
           child: Text(
-            "League Room: $_leagueRoomName",
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            _leagueRoomName ?? "League Room",
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
           ),
         ),
-        const Divider(),
+        // Column headers
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          color: Colors.grey.shade100,
+          child: Row(
+            children: [
+              const SizedBox(width: 32), // Space for rank (matches list items)
+              Expanded(
+                flex: 3,
+                child: Text(
+                  "TEAM",
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "CHAL",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "PTS",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        // List of league teams
         Expanded(
           child: ListView.builder(
             itemCount: _leagueTeams.length,
+            padding: const EdgeInsets.only(top: 4),
             itemBuilder: (context, index) {
               final team = _leagueTeams[index];
-              final members = List<Map<String, dynamic>>.from(team['members'] ?? []);
+              final bool isTopThree = index < 3;
+              // Safely prepare a comma-separated string of team member names.
+              final members = (team['members'] as List?)
+                  ?.map((m) => m['name']?.toString() ?? '')
+                  .where((name) => name.isNotEmpty)
+                  .toList() ??
+                  [];
+              final memberNames = members.join(', ');
 
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: ListTile(
-                  title: Text(
-                    "Team: ${team['team_name']} (ID: ${team['team_id']})",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Column(
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: members.map<Widget>((member) {
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          "• ${member['name']} (ID: ${member['user_id']})",
-                          style: const TextStyle(fontSize: 14),
+                    children: [
+                      // Main row: Rank, team name, challenges, and points
+                      Row(
+                        children: [
+                          // Rank
+                          SizedBox(
+                            width: 32,
+                            child: Text(
+                              "${index + 1}",
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: isTopThree ? Colors.black : Colors.grey.shade600,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          // Team name column (cleaned)
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              _getCleanTeamName(team['team_name'] ?? ''),
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: isTopThree ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                          // Challenges column
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                "${team['completed_challenges'] ?? 0}",
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                          ),
+                          // Points column
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                "${team['total_points'] ?? 0}",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: isTopThree ? Colors.amber.shade700 : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Display team members if available.
+                      if (memberNames.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0, left: 32),
+                          child: Text(
+                            memberNames,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
                         ),
-                      );
-                    }).toList(),
+                    ],
                   ),
                 ),
               );
             },
           ),
         ),
-        // Show End League button if current user is the owner
+        // End League button for the owner.
         if (isOwner)
-          Padding(
-            padding: const EdgeInsets.all(16.0),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Colors.grey.shade200)),
+            ),
             child: Center(
               child: ElevatedButton(
                 onPressed: _handleEndLeague,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.redAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  minimumSize: const Size(200, 50),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
                 child: const Text(
                   'End League',
-                  style: TextStyle(fontSize: 18, color: Colors.white),
+                  style: TextStyle(fontSize: 14, color: Colors.white),
                 ),
               ),
             ),
