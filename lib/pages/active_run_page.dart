@@ -28,8 +28,8 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   bool _isTracking = false;
   bool _autoPaused = false;
   int _stillCounter = 0;
-  final double _pauseThreshold = 0.5;   // If speed falls below this, count as "still"
-  final double _resumeThreshold = 1.0;    // If speed exceeds this, resume running
+  final double _pauseThreshold = 0.5; // If speed falls below this, count as "still"
+  final double _resumeThreshold = 1.0;  // If speed exceeds this, resume running
   bool _isInitializing = true;
   StreamSubscription<LocationData>? _locationSubscription;
 
@@ -230,6 +230,12 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         _endLocation!.time!.toInt(),
       ).toUtc().toIso8601String();
 
+      // Convert _route to a JSON-friendly list
+      final routeJson = _route.map((point) => {
+        'latitude': point.latitude,
+        'longitude': point.longitude,
+      }).toList();
+
       final requestBody = jsonEncode({
         'user_id': user.id,
         'start_time': startTime,
@@ -239,6 +245,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
         'end_latitude': _endLocation!.latitude,
         'end_longitude': _endLocation!.longitude,
         'distance_covered': distance,
+        'route': routeJson, // <-- New field added for route data
       });
 
       debugPrint("Saving run data with body: $requestBody");
@@ -313,7 +320,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
               }
             }
           } else {
-            // No challenge, just show simple success message
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -324,7 +330,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
             }
           }
 
-          // Only navigate to challenges page if there was a challenge
           if (hasChallenge) {
             Future.delayed(const Duration(seconds: 2), () {
               if (mounted) {
@@ -379,7 +384,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   Widget build(BuildContext context) {
     final distanceKm = _distanceCovered / 1000;
 
-    // While initializing, show a waiting screen.
     if (_isInitializing) {
       return Scaffold(
         body: Container(
@@ -415,12 +419,10 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
       );
     }
 
-    // Main run screen with Google Map and overlays.
     return Scaffold(
       appBar: AppBar(title: const Text('Active Run')),
       body: Stack(
         children: [
-          // Google Map background
           GoogleMap(
             initialCameraPosition: CameraPosition(
               target: _currentLocation != null &&
@@ -437,7 +439,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
               _mapController = controller;
             },
           ),
-          // Overlays for time and distance
           Positioned(
             top: 20,
             left: 20,
@@ -461,7 +462,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
               ),
             ),
           ),
-          // In case of auto-pause
           if (_autoPaused)
             Positioned(
               top: 90,
@@ -477,7 +477,6 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
                 ),
               ),
             ),
-          // End Run button at the bottom center
           Positioned(
             bottom: 20,
             left: MediaQuery.of(context).size.width * 0.5 - 60,
