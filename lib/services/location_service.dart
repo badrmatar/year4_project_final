@@ -14,7 +14,7 @@ class LocationService {
     // Request high accuracy and set a minimum distance filter (in meters)
     await _location.changeSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 5,
+      distanceFilter: 15,
     );
 
     // Start tracking location immediately

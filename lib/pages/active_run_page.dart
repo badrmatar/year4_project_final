@@ -68,7 +68,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
     });
 
     // Fallback timer in case GPS takes too long
-    Timer(const Duration(seconds: 30), () {
+    Timer(const Duration(seconds: 5), () {
       if (_isInitializing && mounted && _currentLocation != null) {
         _isInitializing = false;
         _startRun(_currentLocation!);
@@ -116,7 +116,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
           newLocation.longitude!,
         );
         // Only update if movement is significant (e.g. > 3 meters)
-        if (distance > 3.0) {
+        if (distance > 20.0) {
           setState(() {
             _distanceCovered += distance;
             // Update _lastRecordedLocation after adding the distance.
@@ -383,7 +383,7 @@ class _ActiveRunPageState extends State<ActiveRunPage> {
   @override
   Widget build(BuildContext context) {
     final distanceKm = _distanceCovered / 1000;
-
+    print('Accuracy: ${_currentLocation!.accuracy?.toStringAsFixed(1) ?? "Unknown"} meters');
     if (_isInitializing) {
       return Scaffold(
         body: Container(
