@@ -31,15 +31,16 @@ serve(async (req: Request) => {
       end_latitude,
       end_longitude,
       distance_covered,
-      route  // <-- New field expected as a JSON array of coordinate objects
+      route,  // JSON array of coordinate objects
+      journey_type, // New field: should be 'solo' or 'duo'
     } = body;
 
     const validationErrors = [];
     if (typeof user_id !== 'number') validationErrors.push('user_id must be a number');
     if (typeof start_time !== 'string') validationErrors.push('start_time must be a string');
     if (typeof distance_covered !== 'number') validationErrors.push('distance_covered must be a number');
-    // Validate route is an array.
     if (!Array.isArray(route)) validationErrors.push('route must be an array');
+    // journey_type is optional; if not provided, default to 'solo'
 
     if (validationErrors.length > 0) {
       return new Response(
@@ -47,6 +48,11 @@ serve(async (req: Request) => {
         { status: 400 }
       );
     }
+
+    // Set default journey_type to 'solo' if not provided or invalid.
+    const journeyType = (typeof journey_type === 'string' && (journey_type === 'duo' || journey_type === 'solo'))
+      ? journey_type
+      : 'solo';
 
     // Get user's active team
     const { data: teamMembership, error: teamError } = await supabase
@@ -87,7 +93,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Insert contribution (including the new "route" field)
+    // Insert contribution including the journey_type
     const { data: newContribution, error: insertError } = await supabase
       .from('user_contributions')
       .insert({
@@ -101,6 +107,7 @@ serve(async (req: Request) => {
         end_longitude,
         distance_covered,
         route, // Save route as JSONB
+        journey_type: journeyType, // New field
         active: false,
         contribution_details: `Distance covered: ${distance_covered}m`
       })
@@ -147,7 +154,7 @@ serve(async (req: Request) => {
       }
     }
 
-    // Return response with all needed information
+    // Build response object
     const response = {
       data: {
         ...newContribution,

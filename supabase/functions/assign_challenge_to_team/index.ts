@@ -129,7 +129,7 @@ serve(async (req: Request) => {
       .insert({
         team_id,
         challenge_id,
-        bonus: false,
+        multiplier: 1,
         iscompleted: false,
       })
       .select('team_challenge_id')

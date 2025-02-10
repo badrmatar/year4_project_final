@@ -116,16 +116,31 @@ class _ChallengesPageState extends State<ChallengesPage> {
 
   Future<void> _handleChallengeAction(Challenge challenge, dynamic activeTeamChallenge, BuildContext context) async {
     if (activeTeamChallenge != null) {
-      // If team already has an active challenge, go straight to run page
-      Navigator.pushNamed(context, '/active_run');
+      // If team already has an active challenge, go to journey type selection
+      Navigator.pushNamed(
+          context,
+          '/journey_type',
+          arguments: {
+            'challenge_id': challenge.challengeId,
+            'team_challenge_id': activeTeamChallenge['team_challenge_id']
+          }
+      );
       return;
     }
 
-    // Otherwise, assign new challenge to team
-    await _assignChallengeToTeam(challenge.challengeId, context);
+    // Otherwise, assign new challenge to team first
+    final success = await _assignChallengeToTeam(challenge.challengeId, context);
+    if (success) {
+      // Then navigate to journey type selection
+      Navigator.pushNamed(
+          context,
+          '/journey_type',
+          arguments: {'challenge_id': challenge.challengeId}
+      );
+    }
   }
 
-  Future<void> _assignChallengeToTeam(int challengeId, BuildContext context) async {
+  Future<bool> _assignChallengeToTeam(int challengeId, BuildContext context) async {
     final user = Provider.of<UserModel>(context, listen: false);
     final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/assign_challenge_to_team';
 
@@ -146,17 +161,19 @@ class _ChallengesPageState extends State<ChallengesPage> {
         setState(() {
           _challengesData = _fetchChallengesAndTeamStatus();
         });
-        Navigator.pushNamed(context, '/active_run');
+        return true;
       } else {
         final errorData = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(errorData['error'] ?? 'Failed to start challenge')),
         );
+        return false;
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
+      return false;
     }
   }
 
@@ -189,7 +206,7 @@ class _ChallengesPageState extends State<ChallengesPage> {
               final isActiveChallenge = activeTeamChallenge != null &&
                   activeTeamChallenge['challenge_id'] == challenge.challengeId;
               final totalDistance = isActiveChallenge
-                  ? (activeTeamChallenge['total_distance'] as double) / 1000 // Convert to km
+                  ? (activeTeamChallenge['total_distance'] as double) / 1000
                   : 0.0;
 
               return Card(

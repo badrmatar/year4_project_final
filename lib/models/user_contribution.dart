@@ -16,6 +16,7 @@ class UserContribution {
   final double endLongitude;
   final String? contributionDetails;
   final int pointsEarned;
+  final String journeyType;
   @JsonKey(
     fromJson: _latLngListFromJson,
     toJson: _latLngListToJson,
@@ -35,6 +36,7 @@ class UserContribution {
     this.contributionDetails,
     required this.pointsEarned,
     required this.route,
+    required this.journeyType,
   });
 
   factory UserContribution.fromJson(Map<String, dynamic> json) =>
