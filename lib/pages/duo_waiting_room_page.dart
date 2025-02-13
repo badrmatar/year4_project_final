@@ -8,7 +8,6 @@ import '../models/user.dart';
 import '../services/location_service.dart';
 
 class DuoWaitingRoom extends StatefulWidget {
-  /// Use a valid team challenge ID that exists in the team_challenges table.
   final int teamChallengeId;
 
   const DuoWaitingRoom({
@@ -25,16 +24,17 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
   final supabase = Supabase.instance.client;
 
   StreamSubscription<Position>? _locationSubscription;
-  Timer? _teammateCheckTimer;
-  Timer? _readyPollingTimer;
+  Timer? _statusCheckTimer;
   Position? _currentLocation;
   Map<String, dynamic>? _teammateInfo;
   double? _teammateDistance;
   bool _isInitializing = true;
+  bool _hasJoinedWaitingRoom = false;
   static const double REQUIRED_PROXIMITY = 200; // in meters
 
-  // Local flag to indicate that the user has pressed "Ready"
+  // Local flags for status
   bool _isReady = false;
+  bool _hasTeammate = false;
 
   @override
   void initState() {
@@ -43,83 +43,211 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
   }
 
   Future<void> _initializeLocation() async {
-    // Get the initial location.
-    final initialPosition = await _locationService.getCurrentLocation();
-    if (initialPosition != null) {
-      setState(() {
-        _currentLocation = initialPosition;
-        _isInitializing = false;
-      });
-      _startLocationTracking();
-      _createWaitingRoomEntry();
-      _startReadyPolling();
+    try {
+      // Clean up any existing entries first
+      await _cleanupExistingEntries();
+
+      final initialPosition = await _locationService.getCurrentLocation();
+      if (initialPosition != null && mounted) {
+        setState(() {
+          _currentLocation = initialPosition;
+          _isInitializing = false;
+        });
+        await _joinWaitingRoom();
+        _startLocationTracking();
+        _startStatusChecking();
+      }
+    } catch (e) {
+      debugPrint('Error initializing location: $e');
     }
   }
 
-  void _startLocationTracking() {
-    // Listen for location changes.
-    _locationSubscription = _locationService.trackLocation().listen((position) {
-      setState(() => _currentLocation = position);
-      _updateLocationInWaitingRoom();
-    });
+  Future<void> _cleanupExistingEntries() async {
+    try {
+      final user = Provider.of<UserModel>(context, listen: false);
+      // First, delete any existing entries for this user
+      await supabase
+          .from('duo_waiting_room')
+          .delete()
+          .match({
+        'user_id': user.id,
+        'team_challenge_id': widget.teamChallengeId,
+      });
 
-    // Start checking for a teammate every 2 seconds.
-    _teammateCheckTimer = Timer.periodic(
-      const Duration(seconds: 2),
-          (_) => _checkForTeammate(),
-    );
+      // Also clean up any stale entries for this challenge
+      final staleTime = DateTime.now().subtract(const Duration(seconds: 30));
+      await supabase
+          .from('duo_waiting_room')
+          .delete()
+          .match({
+        'team_challenge_id': widget.teamChallengeId,
+      })
+          .lt('last_update', staleTime.toIso8601String());
+
+    } catch (e) {
+      debugPrint('Error cleaning up existing entries: $e');
+    }
   }
 
-  /// Poll your own waiting room row to check if both users are ready.
-  void _startReadyPolling() {
-    _readyPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      try {
-        // Query the waiting room rows for the given team challenge.
-        final response = await supabase
-            .from('duo_waiting_room')
-            .select('user_id, is_ready')
-            .eq('team_challenge_id', widget.teamChallengeId);
-        // Since the response is a PostgrestList, we cast it directly as a List.
-        final rows = response as List;
-        if (rows.isNotEmpty && rows.length >= 2) {
-          final bothReady = rows.every((row) => row['is_ready'] == true);
-          if (bothReady) {
-            _readyPollingTimer?.cancel();
-            _navigateToActiveRun();
-          }
-        }
-      } catch (e) {
-        debugPrint('Error polling ready status: $e');
-      }
-    });
-  }
-
-  Future<void> _createWaitingRoomEntry() async {
+  Future<void> _joinWaitingRoom() async {
     if (_currentLocation == null) return;
+
     final user = Provider.of<UserModel>(context, listen: false);
     try {
-      // Upsert the waiting room entry using the valid team challenge ID.
-      // Initialize the 'is_ready' flag to false.
-      await supabase.from('duo_waiting_room').upsert({
+      // Create new waiting room entry
+      await supabase
+          .from('duo_waiting_room')
+          .insert({
         'user_id': user.id,
         'team_challenge_id': widget.teamChallengeId,
         'current_latitude': _currentLocation!.latitude,
         'current_longitude': _currentLocation!.longitude,
         'is_ready': false,
+        'has_ended': false,
+        'max_distance_exceeded': false,
+        'last_update': DateTime.now().toIso8601String(),
+      });
+
+      setState(() {
+        _hasJoinedWaitingRoom = true;
       });
     } catch (e) {
-      debugPrint('Error creating waiting room entry: $e');
+      debugPrint('Error joining waiting room: $e');
+    }
+  }
+
+  void _startLocationTracking() {
+    _locationSubscription = _locationService.trackLocation().listen((position) {
+      if (mounted) {
+        setState(() => _currentLocation = position);
+        _updateLocationInWaitingRoom();
+      }
+    });
+  }
+
+  void _startStatusChecking() {
+    // Cancel existing timer if any
+    _statusCheckTimer?.cancel();
+
+    // Start new status check timer - checking more frequently (every 500ms)
+    _statusCheckTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+          (_) => _checkWaitingRoomStatus(),
+    );
+  }
+
+  Future<void> _checkWaitingRoomStatus() async {
+    if (!_hasJoinedWaitingRoom) return;
+
+    try {
+      final user = Provider.of<UserModel>(context, listen: false);
+
+      // Get all active waiting room entries for this challenge
+      final response = await supabase
+          .from('duo_waiting_room')
+          .select('*, users(name)')
+          .eq('team_challenge_id', widget.teamChallengeId)
+          .eq('has_ended', false);  // Only get active entries
+
+      final rows = response as List;
+
+      // Find teammate's entry
+      Map<String, dynamic>? teammateEntry;
+      bool bothUsersPresent = false;
+
+      if (rows.length == 2) {
+        bothUsersPresent = true;
+        // Find the teammate's entry (not current user's entry)
+        try {
+          teammateEntry = rows.firstWhere(
+                (row) => row['user_id'] != user.id,
+          ) as Map<String, dynamic>;
+        } catch (e) {
+          teammateEntry = null;
+          bothUsersPresent = false;
+        }
+      }
+
+      // Check if teammate's data is fresh (less than 10 seconds old)
+      if (teammateEntry != null) {
+        final lastUpdate = DateTime.parse(teammateEntry['last_update']);
+        final timeDiff = DateTime.now().difference(lastUpdate).inSeconds;
+        debugPrint('Time since teammate update: $timeDiff seconds');
+
+        if (timeDiff >= 15) {  // Increased from 10 to 15 seconds for more tolerance
+          debugPrint('Teammate data considered stale');
+          teammateEntry = null;  // Data is stale, treat as no teammate
+          bothUsersPresent = false;
+        }
+      }
+
+      // Update location more frequently when teammate is found
+      if (bothUsersPresent && _currentLocation != null) {
+        _updateLocationInWaitingRoom();
+      }
+
+      if (mounted) {
+        setState(() {
+          _hasTeammate = bothUsersPresent;  // Only true when both users are present with fresh data
+          _teammateInfo = teammateEntry;
+        });
+      }
+
+      // Update teammate distance if we have their location
+      if (teammateEntry != null && _currentLocation != null) {
+        final partnerLat = teammateEntry['current_latitude'] as num;
+        final partnerLng = teammateEntry['current_longitude'] as num;
+        final distance = Geolocator.distanceBetween(
+          _currentLocation!.latitude,
+          _currentLocation!.longitude,
+          partnerLat.toDouble(),
+          partnerLng.toDouble(),
+        );
+
+        if (mounted) {
+          setState(() {
+            _teammateDistance = distance;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _teammateDistance = null;
+          });
+        }
+      }
+
+      // Check if both users are ready and have fresh data
+      if (bothUsersPresent) {
+        final allReady = rows.every((row) => row['is_ready'] == true);
+        final allRecent = rows.every((row) {
+          final updatedAt = DateTime.parse(row['last_update']);
+          return DateTime.now().difference(updatedAt).inSeconds < 10;
+        });
+
+        if (allReady && allRecent) {
+          await _navigateToActiveRun();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking waiting room status: $e');
     }
   }
 
   Future<void> _updateLocationInWaitingRoom() async {
-    if (_currentLocation == null) return;
+    if (_currentLocation == null || !_hasJoinedWaitingRoom) return;
+
     final user = Provider.of<UserModel>(context, listen: false);
     try {
-      await supabase.from('duo_waiting_room').update({
+      debugPrint('Updating location in waiting room');
+      await supabase
+          .from('duo_waiting_room')
+          .update({
         'current_latitude': _currentLocation!.latitude,
         'current_longitude': _currentLocation!.longitude,
-      }).match({
+        'last_update': DateTime.now().toIso8601String(),
+      })
+          .match({
         'user_id': user.id,
         'team_challenge_id': widget.teamChallengeId,
       });
@@ -128,89 +256,51 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
     }
   }
 
-  Future<void> _checkForTeammate() async {
-    if (_currentLocation == null) return;
-    final user = Provider.of<UserModel>(context, listen: false);
-    try {
-      // Use maybeSingle() to get at most one partner row.
-      final partnerResponse = await supabase
-          .from('duo_waiting_room')
-          .select('*, users(name)')
-          .eq('team_challenge_id', widget.teamChallengeId)
-          .neq('user_id', user.id)
-          .maybeSingle();
-
-      if (partnerResponse == null) return;
-
-      final data = partnerResponse as Map<String, dynamic>;
-      final partnerLat = data['current_latitude'] as num;
-      final partnerLng = data['current_longitude'] as num;
-      final distance = Geolocator.distanceBetween(
-        _currentLocation!.latitude,
-        _currentLocation!.longitude,
-        partnerLat.toDouble(),
-        partnerLng.toDouble(),
-      );
-
-      setState(() {
-        _teammateInfo = data;
-        _teammateDistance = distance;
-      });
-      // Optionally, you can update the UI to show partner info even before ready.
-    } catch (e) {
-      debugPrint('Error checking for teammate: $e');
-    }
-  }
-
-  /// Called when the user presses the "Ready" button.
   Future<void> _setReady() async {
     final user = Provider.of<UserModel>(context, listen: false);
     try {
-      await supabase.from('duo_waiting_room').update({
+      await supabase
+          .from('duo_waiting_room')
+          .update({
         'is_ready': true,
-      }).match({
+        'last_update': DateTime.now().toIso8601String(),
+      })
+          .match({
         'user_id': user.id,
         'team_challenge_id': widget.teamChallengeId,
       });
-      setState(() {
-        _isReady = true;
-      });
+
+      if (mounted) {
+        setState(() {
+          _isReady = true;
+        });
+      }
     } catch (e) {
       debugPrint('Error setting ready status: $e');
     }
   }
 
-  void _navigateToActiveRun() {
-    _teammateCheckTimer?.cancel();
-    _readyPollingTimer?.cancel();
-    Navigator.pushReplacementNamed(
-      context,
-      '/active_run',
-      arguments: {
-        'journey_type': 'duo',
-        'team_challenge_id': widget.teamChallengeId,
-      },
-    );
-  }
+  Future<void> _navigateToActiveRun() async {
+    _statusCheckTimer?.cancel();
+    _locationSubscription?.cancel();
 
-  Future<void> _cleanupWaitingRoom() async {
-    final user = Provider.of<UserModel>(context, listen: false);
-    try {
-      await supabase.from('duo_waiting_room').delete().match({
-        'user_id': user.id,
-        'team_challenge_id': widget.teamChallengeId,
-      });
-    } catch (e) {
-      debugPrint('Error cleaning up waiting room: $e');
+    if (mounted) {
+      await Navigator.pushReplacementNamed(
+        context,
+        '/active_run',
+        arguments: {
+          'journey_type': 'duo',
+          'team_challenge_id': widget.teamChallengeId,
+        },
+      );
     }
   }
 
   @override
   void dispose() {
     _locationSubscription?.cancel();
-    _teammateCheckTimer?.cancel();
-    _readyPollingTimer?.cancel();
-    _cleanupWaitingRoom();
+    _statusCheckTimer?.cancel();
+    _cleanupExistingEntries();
     super.dispose();
   }
 
@@ -219,39 +309,51 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
     if (_isInitializing) {
       return _buildLoadingScreen();
     }
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Waiting for Teammate'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            _cleanupWaitingRoom();
-            Navigator.pop(context);
-          },
+
+    return WillPopScope(
+      onWillPop: () async {
+        await _cleanupExistingEntries();
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Waiting for Teammate'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              await _cleanupExistingEntries();
+              Navigator.pop(context);
+            },
+          ),
         ),
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildStatusCard(),
-              const SizedBox(height: 20),
-              if (_teammateInfo != null) _buildTeammateInfo(),
-              const SizedBox(height: 40),
-              // Show the Ready button if not already set.
-              if (!_isReady)
-                ElevatedButton(
-                  onPressed: _setReady,
-                  child: const Text('Ready'),
-                )
-              else
-                const Text(
-                  'You are ready! Waiting for teammate...',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-            ],
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildStatusCard(),
+                const SizedBox(height: 20),
+                if (_hasTeammate) _buildTeammateInfo(),
+                const SizedBox(height: 40),
+                // Only show Ready button when teammate is present and user isn't ready
+                if (_hasTeammate && !_isReady)
+                  ElevatedButton(
+                    onPressed: _setReady,
+                    child: const Text('Ready'),
+                  )
+                else if (_isReady)
+                  const Text(
+                    'You are ready! Waiting for teammate...',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  )
+                else
+                  const Text(
+                    'Waiting for teammate to join...',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -284,9 +386,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
             const Icon(Icons.location_searching, size: 50),
             const SizedBox(height: 16),
             Text(
-              _teammateInfo == null
-                  ? 'Waiting for teammate...'
-                  : 'Teammate found!',
+              _hasTeammate ? 'Teammate found!' : 'Waiting for teammate...',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -309,6 +409,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
     final distance = _teammateDistance?.toStringAsFixed(1) ?? '?';
     final isInRange =
         _teammateDistance != null && _teammateDistance! <= REQUIRED_PROXIMITY;
+
     return Card(
       elevation: 4,
       color: isInRange ? Colors.green.shade50 : Colors.orange.shade50,

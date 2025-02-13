@@ -60,6 +60,10 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
   Timer? _partnerPollingTimer;
   static const double MAX_ALLOWED_DISTANCE = 500; // Auto-end if >500m
 
+  // Duo run status variables
+  bool _hasEnded = false;
+  bool _isRunning = true;
+
   @override
   void initState() {
     super.initState();
@@ -67,35 +71,178 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
     _startPartnerPolling();
   }
 
-  Future<void> _initializeRun() async {
-    final initialPosition = await _locationService.getCurrentLocation();
-    if (initialPosition != null) {
-      setState(() {
-        _currentLocation = initialPosition;
-        _isInitializing = false;
-      });
-      _startRun(initialPosition);
-    }
-    _locationSubscription =
-        _locationService.trackLocation().listen((position) {
+  void _startPartnerPolling() {
+    _partnerPollingTimer?.cancel();
+    _partnerPollingTimer = Timer.periodic(
+      const Duration(seconds: 2),
+          (timer) async {
+        if (!mounted || _hasEnded) {
+          timer.cancel();
+          return;
+        }
+        _pollPartnerStatus();
+      },
+    );
+  }
+
+  Future<void> _pollPartnerStatus() async {
+    if (_currentLocation == null || !mounted) return;
+
+    try {
+      final user = Provider.of<UserModel>(context, listen: false);
+      final results = await supabase
+          .from('duo_waiting_room')
+          .select('has_ended, current_latitude, current_longitude')
+          .eq('team_challenge_id', widget.challengeId)
+          .neq('user_id', user.id);
+
+      if (!mounted) return;
+
+      if (results is List && results.isNotEmpty) {
+        final data = results.first as Map<String, dynamic>;
+
+        // Check if partner has ended their run
+        if (data['has_ended'] == true) {
+          await _endRunDueToPartner();
+          return;
+        }
+
+        // Calculate partner distance
+        final partnerLat = data['current_latitude'] as num;
+        final partnerLng = data['current_longitude'] as num;
+        final calculatedDistance = Geolocator.distanceBetween(
+          _currentLocation!.latitude,
+          _currentLocation!.longitude,
+          partnerLat.toDouble(),
+          partnerLng.toDouble(),
+        );
+
+        if (mounted) {
           setState(() {
-            _currentLocation = position;
+            _partnerDistance = calculatedDistance;
+            _partnerLocation = Position.fromMap({
+              'latitude': partnerLat.toDouble(),
+              'longitude': partnerLng.toDouble(),
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+              'accuracy': 0.0,
+              'altitude': 0.0,
+              'heading': 0.0,
+              'speed': 0.0,
+              'speedAccuracy': 0.0,
+              'altitudeAccuracy': 0.0,
+            });
           });
-          if (_isInitializing && position.accuracy < 20) {
-            _isInitializing = false;
-            _startRun(position);
-          }
-        });
-    // Fallback timer in case GPS is slow.
-    Timer(const Duration(seconds: 3000), () {
-      if (_isInitializing && mounted && _currentLocation != null) {
-        _isInitializing = false;
-        _startRun(_currentLocation!);
+        }
+
+        // Auto-end if partner is too far away
+        if (calculatedDistance > MAX_ALLOWED_DISTANCE && !_hasEnded) {
+          // First update duo_waiting_room to indicate max distance exceeded
+          await supabase.from('duo_waiting_room').update({
+            'has_ended': true,
+          }).match({
+            'team_challenge_id': widget.challengeId,
+            'user_id': user.id,
+          });
+
+          await _handleMaxDistanceExceeded();
+          return;
+        }
       }
-    });
+    } catch (e) {
+      debugPrint('Error in partner polling: $e');
+    }
+  }
+
+  Future<void> _endRunDueToPartner() async {
+    if (_hasEnded) return;
+
+    final user = Provider.of<UserModel>(context, listen: false);
+    try {
+      _hasEnded = true;
+      _isTracking = false;
+
+      // Clean up subscriptions immediately
+      _timer?.cancel();
+      _locationSubscription?.cancel();
+      _partnerPollingTimer?.cancel();
+
+      // Save final run data
+      await _saveRunData();
+
+      // Just update active status
+      await supabase.from('user_contributions').update({
+        'active': false,
+      }).match({
+        'team_challenge_id': widget.challengeId,
+        'user_id': user.id,
+      });
+
+      if (mounted) {
+        setState(() {
+          _isRunning = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Your teammate has ended the run. Run completed."),
+            duration: Duration(seconds: 3),
+          ),
+        );
+
+        // Wait briefly to show the message
+        await Future.delayed(const Duration(seconds: 2));
+
+        Navigator.pushReplacementNamed(context, '/challenges');
+      }
+    } catch (e) {
+      debugPrint('Error ending run due to partner: $e');
+    }
+  }
+
+  Future<void> _initializeRun() async {
+    try {
+      final initialPosition = await _locationService.getCurrentLocation();
+      if (initialPosition != null && mounted) {
+        setState(() {
+          _currentLocation = initialPosition;
+          _isInitializing = false;
+        });
+        _startRun(initialPosition);
+      }
+
+      _locationSubscription?.cancel();
+      _locationSubscription = _locationService.trackLocation().listen(
+            (position) {
+          if (mounted && !_hasEnded) {
+            setState(() {
+              _currentLocation = position;
+            });
+            if (_isInitializing && position.accuracy < 20) {
+              _isInitializing = false;
+              _startRun(position);
+            }
+          }
+        },
+        onError: (error) {
+          debugPrint('Error tracking location: $error');
+        },
+      );
+
+      // Fallback timer in case GPS is slow
+      Timer(const Duration(seconds: 30), () {
+        if (_isInitializing && mounted && _currentLocation != null) {
+          _isInitializing = false;
+          _startRun(_currentLocation!);
+        }
+      });
+    } catch (e) {
+      debugPrint('Error initializing run: $e');
+    }
   }
 
   void _startRun(Position position) {
+    if (!mounted) return;
+
     setState(() {
       _startLocation = position;
       _isTracking = true;
@@ -110,7 +257,14 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
       _lastRecordedLocation = startPoint;
     });
 
+    // Cancel any existing timer
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || !_isTracking || _hasEnded) {
+        timer.cancel();
+        return;
+      }
+
       if (!_autoPaused && mounted) {
         setState(() {
           _secondsElapsed++;
@@ -118,44 +272,59 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
       }
     });
 
-    _locationService.trackLocation().listen((position) {
-      if (!_isTracking) return;
-
-      final speed = position.speed.clamp(0.0, double.infinity);
-      _handleAutoPauseLogic(speed);
-
-      if (_lastRecordedLocation != null && !_autoPaused) {
-        final distance = _calculateDistance(
-          _lastRecordedLocation!.latitude,
-          _lastRecordedLocation!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        if (distance > 20.0) {
-          setState(() {
-            _distanceCovered += distance;
-            _lastRecordedLocation =
-                LatLng(position.latitude, position.longitude);
-          });
+    // Cancel any existing location subscription
+    _locationSubscription?.cancel();
+    _locationSubscription = _locationService.trackLocation().listen(
+          (position) {
+        if (!mounted || !_isTracking || _hasEnded) {
+          _locationSubscription?.cancel();
+          return;
         }
-      }
 
-      setState(() {
-        _currentLocation = position;
-        final newPoint = LatLng(position.latitude, position.longitude);
-        _route.add(newPoint);
-        _routePolyline = _routePolyline.copyWith(pointsParam: _route);
-      });
+        final speed = position.speed.clamp(0.0, double.infinity);
+        _handleAutoPauseLogic(speed);
 
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLng(
-          LatLng(position.latitude, position.longitude),
-        ),
-      );
-    });
+        if (_lastRecordedLocation != null && !_autoPaused) {
+          final distance = _calculateDistance(
+            _lastRecordedLocation!.latitude,
+            _lastRecordedLocation!.longitude,
+            position.latitude,
+            position.longitude,
+          );
+          if (distance > 20.0 && mounted) {
+            setState(() {
+              _distanceCovered += distance;
+              _lastRecordedLocation =
+                  LatLng(position.latitude, position.longitude);
+            });
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _currentLocation = position;
+            final newPoint = LatLng(position.latitude, position.longitude);
+            _route.add(newPoint);
+            _routePolyline = _routePolyline.copyWith(pointsParam: _route);
+          });
+
+          _mapController?.animateCamera(
+            CameraUpdate.newLatLng(
+              LatLng(position.latitude, position.longitude),
+            ),
+          );
+        }
+      },
+      onError: (error) {
+        debugPrint('Location tracking error: $error');
+      },
+      cancelOnError: false,
+    );
   }
 
   void _handleAutoPauseLogic(double speed) {
+    if (!mounted) return;
+
     if (_autoPaused) {
       if (speed > _resumeThreshold) {
         setState(() {
@@ -191,129 +360,168 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
     return earthRadius * c;
   }
 
-  // Partner polling: every 2 seconds, check partner's location
-  void _startPartnerPolling() {
-    _partnerPollingTimer =
-        Timer.periodic(const Duration(seconds: 2), (timer) async {
-          if (_currentLocation == null) return;
-          final user = Provider.of<UserModel>(context, listen: false);
-          try {
-            // Query the duo_waiting_room and get all matching rows.
-            final results = await supabase
-                .from('duo_waiting_room')
-                .select()
-                .eq('team_challenge_id', widget.challengeId)
-                .neq('user_id', user.id);
-            if (results is List && results.isNotEmpty) {
-              final data = results.first as Map<String, dynamic>;
-              final partnerLat = data['current_latitude'] as num;
-              final partnerLng = data['current_longitude'] as num;
-              final calculatedDistance = Geolocator.distanceBetween(
-                _currentLocation!.latitude,
-                _currentLocation!.longitude,
-                partnerLat.toDouble(),
-                partnerLng.toDouble(),
-              );
-              setState(() {
-                _partnerDistance = calculatedDistance;
-                _partnerLocation = Position.fromMap({
-                  'latitude': partnerLat.toDouble(),
-                  'longitude': partnerLng.toDouble(),
-                  'timestamp': DateTime.now().millisecondsSinceEpoch,
-                  'accuracy': 0.0,
-                  'altitude': 0.0,
-                  'heading': 0.0,
-                  'speed': 0.0,
-                  'speedAccuracy': 0.0,
-                  'altitudeAccuracy': 0.0, // Required parameter
-                });
-              });
-              // Auto-end the run if partner is more than 500m away.
-              if (calculatedDistance > MAX_ALLOWED_DISTANCE) {
-                _handleMaxDistanceExceeded();
-              }
-            }
-          } catch (e) {
-            debugPrint('Error checking partner location: $e');
-          }
-        });
-  }
+  Future<void> _handleMaxDistanceExceeded() async {
+    if (_hasEnded) return;
 
-  void _handleMaxDistanceExceeded() {
-    endRun();
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          return AlertDialog(
-            title: const Text('Run Ended'),
-            content: const Text(
-                'Your partner is more than 500m away. The run has ended.'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.pushReplacementNamed(context, '/challenges');
-                },
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-    }
-  }
-
-  void endRun() {
-    if (_currentLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot end run without valid location')),
-      );
-      return;
-    }
+    // Stop tracking and timers immediately
+    _isTracking = false;
+    _hasEnded = true;
     _timer?.cancel();
+    _locationSubscription?.cancel();
     _partnerPollingTimer?.cancel();
-    setState(() {
-      _endLocation = _currentLocation;
+
+    final user = Provider.of<UserModel>(context, listen: false);
+
+    try {
+      // Save final run data first
+      await _saveRunData();
+
+      // Update user_contributions to mark as inactive
+      await supabase.from('user_contributions').update({
+        'active': false,
+      }).match({
+        'team_challenge_id': widget.challengeId,
+        'user_id': user.id,
+      });
+
+      // Show dialog
+      if (mounted) {
+        setState(() {
+          _isRunning = false;
+        });
+
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('Run Ended'),
+              content: const Text(
+                  'Distance between teammates exceeded 500m. The run has ended.'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+
+        // Brief delay to ensure user sees the message
+        await Future.delayed(const Duration(seconds: 2));
+
+        Navigator.pushReplacementNamed(context, '/challenges');
+      }
+    } catch (e) {
+      debugPrint('Error handling max distance exceeded: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Error ending run due to max distance.")),
+        );
+      }
+    }
+  }
+
+  Future<void> _endRunManually() async {
+    if (_hasEnded) return;
+
+    final user = Provider.of<UserModel>(context, listen: false);
+    try {
+      // Set flags immediately to stop updates
+      _hasEnded = true;
       _isTracking = false;
-    });
-    _saveRunData();
+
+      // Clean up subscriptions immediately
+      _timer?.cancel();
+      _locationSubscription?.cancel();
+      _partnerPollingTimer?.cancel();
+
+      // Save final run data before ending
+      await _saveRunData();
+
+      // Update both tables concurrently
+      await Future.wait([
+        supabase.from('user_contributions').update({
+          'active': false,
+        }).match({
+          'team_challenge_id': widget.challengeId,
+          'user_id': user.id,
+        }),
+
+        supabase.from('duo_waiting_room').update({
+          'has_ended': true,
+        }).match({
+          'team_challenge_id': widget.challengeId,
+          'user_id': user.id,
+        }),
+      ]);
+
+      if (mounted) {
+        setState(() {
+          _isRunning = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Run ended successfully. Your teammate will be notified."),
+            duration: Duration(seconds: 3),
+          ),
+        );
+
+        // Wait briefly to ensure partner sees the ending message
+        await Future.delayed(const Duration(seconds: 2));
+
+        Navigator.pushReplacementNamed(context, '/challenges');
+      }
+    } catch (e) {
+      debugPrint('Error ending run: $e');
+      if (mounted) {ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Error ending run. Please try again.")),
+      );
+      }
+    }
   }
 
   Future<void> _saveRunData() async {
     try {
       final user = Provider.of<UserModel>(context, listen: false);
-      if (user.id == 0 || _startLocation == null || _endLocation == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Missing required data to save run")),
-        );
+      if (user.id == 0 || _startLocation == null || _currentLocation == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Missing required data to save run")),
+          );
+        }
         return;
       }
+
       final distance = double.parse(_distanceCovered.toStringAsFixed(2));
       final startTime =
       (_startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
-      final endTime =
-      (_endLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
+      final endTime = DateTime.now().toUtc().toIso8601String();
+
       final routeJson = _route
           .map((point) => {
         'latitude': point.latitude,
         'longitude': point.longitude,
       })
           .toList();
+
       final requestBody = jsonEncode({
         'user_id': user.id,
         'start_time': startTime,
         'end_time': endTime,
         'start_latitude': _startLocation!.latitude,
         'start_longitude': _startLocation!.longitude,
-        'end_latitude': _endLocation!.latitude,
-        'end_longitude': _endLocation!.longitude,
+        'end_latitude': _currentLocation!.latitude,
+        'end_longitude': _currentLocation!.longitude,
         'distance_covered': distance,
         'route': routeJson,
         'journey_type': 'duo',
-        // If you later accumulate duo-specific metrics, include them here.
       });
+
       final response = await http.post(
         Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
         headers: {
@@ -322,7 +530,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
         },
         body: requestBody,
       );
-      if (response.statusCode == 201) {
+
+      if (response.statusCode == 201 && mounted) {
         final responseData = jsonDecode(response.body);
         final data = responseData['data'];
         if (data != null) {
@@ -363,19 +572,18 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
               duration: const Duration(seconds: 4),
             ));
           }
-          Future.delayed(const Duration(seconds: 2), () {
-            Navigator.pushReplacementNamed(context, '/challenges');
-          });
         }
-      } else {
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Failed to save run: ${response.body}")),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("An error occurred: ${e.toString()}")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("An error occurred: ${e.toString()}")),
+        );
+      }
     }
   }
 
@@ -387,15 +595,19 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
 
   @override
   void dispose() {
+    _isTracking = false;
+    _hasEnded = true;
     _timer?.cancel();
     _locationSubscription?.cancel();
     _partnerPollingTimer?.cancel();
+    _mapController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final distanceKm = _distanceCovered / 1000;
+
     if (_isInitializing) {
       return Scaffold(
         body: Container(
@@ -430,8 +642,17 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
         ),
       );
     }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Duo Active Run')),
+      appBar: AppBar(
+        title: const Text('Duo Active Run'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.stop),
+            onPressed: _endRunManually,
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           GoogleMap(
@@ -450,7 +671,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
             top: 20,
             left: 20,
             child: Card(
-              color: Colors.white70,
+              color: Colors.white.withOpacity(0.9),
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Column(
@@ -473,7 +694,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
             top: 20,
             right: 20,
             child: Card(
-              color: Colors.lightBlueAccent,
+              color: Colors.lightBlueAccent.withOpacity(0.9),
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Text(
@@ -504,15 +725,18 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
             ),
           Positioned(
             bottom: 20,
-            left: MediaQuery.of(context).size.width * 0.5 - 60,
-            child: ElevatedButton(
-              onPressed: endRun,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-              child: const Text(
-                'End Run',
-                style: TextStyle(fontSize: 18),
+            left: 0,
+            right: 0,
+            child: Center(
+              child: ElevatedButton(
+                onPressed: _endRunManually,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+                child: const Text(
+                  'End Run',
+                  style: TextStyle(fontSize: 18),
+                ),
               ),
             ),
           ),
