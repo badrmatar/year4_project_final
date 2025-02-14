@@ -53,6 +53,7 @@ serve(async (req: Request) => {
     const journeyType = (typeof journey_type === 'string' && (journey_type === 'duo' || journey_type === 'solo'))
       ? journey_type
       : 'solo';
+    console.log('Computed journeyType:', journeyType);
 
     // Get user's active team
     const { data: teamMembership, error: teamError } = await supabase
@@ -122,10 +123,11 @@ serve(async (req: Request) => {
       );
     }
 
-    // Get all contributions for this challenge to sum distances
+    // Get all contributions for this challenge to sum distances.
+    // Note: we also select journey_type for filtering duo contributions.
     const { data: allContributions, error: sumError } = await supabase
       .from('user_contributions')
-      .select('distance_covered')
+      .select('distance_covered, journey_type')
       .eq('team_challenge_id', teamChallenge.team_challenge_id);
 
     if (sumError) {
@@ -142,6 +144,27 @@ serve(async (req: Request) => {
     const requiredKm = teamChallenge.challenges.length;
     const isCompleted = totalKm >= requiredKm;
 
+    // Calculate duo-specific distance by filtering contributions where journey_type === 'duo'
+    const duoMeters = allContributions
+      .filter((c) => c.journey_type === 'duo')
+      .reduce((sum, c) => sum + (c.distance_covered || 0), 0);
+    const duoDistanceKm = duoMeters / 1000;
+
+    // If duo distance reaches at least half the challenge distance, update the multiplier to 2
+    if (duoDistanceKm >= requiredKm / 2) {
+      const { error: multiplierUpdateError } = await supabase
+        .from('team_challenges')
+        .update({ multiplier: 2 })
+        .eq('team_challenge_id', teamChallenge.team_challenge_id);
+      if (multiplierUpdateError) {
+        console.error('Multiplier update error:', multiplierUpdateError);
+      } else {
+        console.log(
+          `Multiplier updated to 2 for team_challenge_id ${teamChallenge.team_challenge_id} because duo distance ${duoDistanceKm} km reached half of required ${requiredKm} km`
+        );
+      }
+    }
+
     // Update challenge status if completed
     if (isCompleted) {
       const { error: updateError } = await supabase
@@ -154,13 +177,14 @@ serve(async (req: Request) => {
       }
     }
 
-    // Build response object
+    // Build response object including duo_distance
     const response = {
       data: {
         ...newContribution,
         challenge_completed: isCompleted,
         total_distance_km: totalKm,
-        required_distance_km: requiredKm
+        required_distance_km: requiredKm,
+        duo_distance: duoDistanceKm
       }
     };
 

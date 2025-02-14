@@ -84,6 +84,22 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
       },
     );
   }
+  String _getDistanceGroup(double distance) {
+    if (distance < 100) {
+      return "<100";
+    } else if (distance < 200) {
+      return "100+";
+    } else if (distance < 300) {
+      return "200+";
+    } else if (distance < 400) {
+      return "300+";
+    } else if (distance < 500) {
+      return "400+";
+    } else {
+      return "500+";
+    }
+  }
+
 
   Future<void> _pollPartnerStatus() async {
     if (_currentLocation == null || !mounted) return;
@@ -698,7 +714,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Text(
-                  'Partner Distance: ${_partnerDistance.toStringAsFixed(1)} m',
+                  'Partner Distance: ${_getDistanceGroup(_partnerDistance)} m',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,

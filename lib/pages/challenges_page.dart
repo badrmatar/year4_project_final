@@ -74,27 +74,32 @@ class _ChallengesPageState extends State<ChallengesPage> {
 
       final teamId = teamMembershipResponse['team_id'];
 
-      // Get team's active challenges with total distance covered
+      // Get team's active challenges with total distance and duo distance.
       final activeTeamChallenges = await supabase
           .from('team_challenges')
-          .select('''
-            *,
-            user_contributions (
-              distance_covered
-            )
-          ''')
+          .select('*, user_contributions ( distance_covered, journey_type )')
           .eq('team_id', teamId)
           .eq('iscompleted', false)
           .order('team_challenge_id', ascending: false);
 
-      // Calculate total distance for each team challenge
+      // Calculate total and duo distance for each team challenge.
       final teamChallengesWithDistance = activeTeamChallenges.map((tc) {
         final contributions = tc['user_contributions'] as List;
         final totalDistance = contributions.fold<double>(
           0,
               (sum, contrib) => sum + (contrib['distance_covered'] ?? 0),
         );
-        return {...tc, 'total_distance': totalDistance};
+        final duoDistance = contributions
+            .where((contrib) => contrib['journey_type'] == 'duo')
+            .fold<double>(
+          0,
+              (sum, contrib) => sum + (contrib['distance_covered'] ?? 0),
+        );
+        return {
+          ...tc,
+          'total_distance': totalDistance,
+          'duo_distance': duoDistance,
+        };
       }).toList();
 
       debugPrint('Found ${challengesResponse.length} challenges for today');
@@ -114,28 +119,151 @@ class _ChallengesPageState extends State<ChallengesPage> {
     }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Today's Challenges")),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _challengesData,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          } else if (!snapshot.hasData ||
+              (snapshot.data!['challenges'] as List).isEmpty) {
+            return const Center(child: Text('No challenges found for today.'));
+          }
+
+          final data = snapshot.data!;
+          final challenges = (data['challenges'] as List)
+              .map((item) => Challenge.fromJson(item))
+              .toList();
+          final activeTeamChallenge = data['activeTeamChallenge'];
+
+          return ListView.builder(
+            itemCount: challenges.length,
+            itemBuilder: (context, index) {
+              final challenge = challenges[index];
+              final isActiveChallenge = activeTeamChallenge != null &&
+                  activeTeamChallenge['challenge_id'] == challenge.challengeId;
+
+              // Safely retrieve the total distance and duo distance.
+              final totalDistance = isActiveChallenge
+                  ? (((activeTeamChallenge['total_distance'] as num?)?.toDouble()) ?? 0.0) / 1000
+                  : 0.0;
+              final duoDistance = isActiveChallenge
+                  ? (((activeTeamChallenge['duo_distance'] as num?)?.toDouble()) ?? 0.0) / 1000
+                  : 0.0;
+              // Retrieve the multiplier, defaulting to 1 if null.
+              final multiplier = isActiveChallenge
+                  ? ((activeTeamChallenge['multiplier'] as num?)?.toInt() ?? 1)
+                  : 1;
+
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ListTile(
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Challenge #${challenge.challengeId}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      if (isActiveChallenge)
+                        Text(
+                          '${totalDistance.toStringAsFixed(2)} km',
+                          style: TextStyle(
+                            color: Colors.green[700],
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                    ],
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: challenge.difficulty.toLowerCase() == 'easy'
+                              ? Colors.lightBlue.shade100
+                              : challenge.difficulty.toLowerCase() == 'medium'
+                              ? Colors.yellow.shade100
+                              : Colors.orange.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Difficulty: ${challenge.difficulty}',
+                          style: TextStyle(
+                            color: challenge.difficulty.toLowerCase() == 'easy'
+                                ? Colors.blue.shade900
+                                : challenge.difficulty.toLowerCase() == 'medium'
+                                ? Colors.yellow.shade900
+                                : Colors.orange.shade900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('Points: ${challenge.earningPoints}'),
+                      Text(
+                          'Time Remaining: ${_getTimeRemaining(challenge.startTime, challenge.duration)}'),
+                      Text(challenge.formattedDistance),
+                      if (isActiveChallenge)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Duo: ${duoDistance.toStringAsFixed(2)} km | Multiplier: $multiplier',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                    ],
+                  ),
+                  trailing: ElevatedButton(
+                    onPressed: activeTeamChallenge != null && !isActiveChallenge
+                        ? null // Disable button if team has a different active challenge
+                        : () => _handleChallengeAction(challenge, activeTeamChallenge, context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isActiveChallenge ? Colors.lightGreen : null,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    child: Text(
+                      isActiveChallenge ? 'Continue Run' : 'Start Run',
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _handleChallengeAction(Challenge challenge, dynamic activeTeamChallenge, BuildContext context) async {
     if (activeTeamChallenge != null) {
-      // If team already has an active challenge, go to journey type selection
+      // If team already has an active challenge, navigate to journey type selection
       Navigator.pushNamed(
-          context,
-          '/journey_type',
-          arguments: {
-            'challenge_id': challenge.challengeId,
-            'team_challenge_id': activeTeamChallenge['team_challenge_id']
-          }
+        context,
+        '/journey_type',
+        arguments: {
+          'challenge_id': challenge.challengeId,
+          'team_challenge_id': activeTeamChallenge['team_challenge_id']
+        },
       );
       return;
     }
 
-    // Otherwise, assign new challenge to team first
+    // Otherwise, assign new challenge to team first.
     final success = await _assignChallengeToTeam(challenge.challengeId, context);
     if (success) {
-      // Then navigate to journey type selection
       Navigator.pushNamed(
-          context,
-          '/journey_type',
-          arguments: {'challenge_id': challenge.challengeId}
+        context,
+        '/journey_type',
+        arguments: {'challenge_id': challenge.challengeId},
       );
     }
   }
@@ -175,110 +303,5 @@ class _ChallengesPageState extends State<ChallengesPage> {
       );
       return false;
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Today's Challenges")),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _challengesData,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          } else if (!snapshot.hasData ||
-              (snapshot.data!['challenges'] as List).isEmpty) {
-            return const Center(child: Text('No challenges found for today.'));
-          }
-
-          final data = snapshot.data!;
-          final challenges = (data['challenges'] as List)
-              .map((item) => Challenge.fromJson(item))
-              .toList();
-          final activeTeamChallenge = data['activeTeamChallenge'];
-
-          return ListView.builder(
-            itemCount: challenges.length,
-            itemBuilder: (context, index) {
-              final challenge = challenges[index];
-              final isActiveChallenge = activeTeamChallenge != null &&
-                  activeTeamChallenge['challenge_id'] == challenge.challengeId;
-              final totalDistance = isActiveChallenge
-                  ? (activeTeamChallenge['total_distance'] as double) / 1000
-                  : 0.0;
-
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: ListTile(
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Challenge #${challenge.challengeId}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      if (isActiveChallenge)
-                        Text(
-                          '${totalDistance.toStringAsFixed(2)} km',
-                          style: TextStyle(
-                            color: Colors.green[700],
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                    ],
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: challenge.difficulty.toLowerCase() == 'easy'
-                              ? Colors.lightBlue.shade100
-                              : challenge.difficulty.toLowerCase() == 'medium'
-                              ? Colors.yellow.shade100
-                              : Colors.orange.shade100,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'Difficulty: ${challenge.difficulty}',
-                          style: TextStyle(
-                            color: challenge.difficulty.toLowerCase() == 'easy'
-                                ? Colors.blue.shade900
-                                : challenge.difficulty.toLowerCase() == 'medium'
-                                ? Colors.yellow.shade900
-                                : Colors.orange.shade900,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Points: ${challenge.earningPoints}'),
-                      Text('Time Remaining: ${_getTimeRemaining(challenge.startTime, challenge.duration)}'),
-                      Text(challenge.formattedDistance),
-                    ],
-                  ),
-                  trailing: ElevatedButton(
-                    onPressed: activeTeamChallenge != null && !isActiveChallenge
-                        ? null  // Disable button if team has different challenge
-                        : () => _handleChallengeAction(challenge, activeTeamChallenge, context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isActiveChallenge ? Colors.lightGreen : null,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    child: Text(
-                      isActiveChallenge ? 'Continue Run' : 'Start Run',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
   }
 }
