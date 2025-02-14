@@ -1,5 +1,3 @@
-// get_team_points/index.ts
-
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -10,18 +8,23 @@ const supabase = createClient(
 
 serve(async (req) => {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed' }),
+      { status: 405 }
+    );
   }
 
   try {
     const { league_room_id } = await req.json();
     console.log('Getting points for league room:', league_room_id);
 
-    // Get completed challenges for all teams in the league
+    // Get completed challenges for all teams in the league,
+    // including the challenge's earning_points and the multiplier for that challenge.
     const { data: teamChallenges, error: challengesError } = await supabase
       .from('team_challenges')
       .select(`
         team_id,
+        multiplier,
         teams!inner (
           team_id,
           team_name,
@@ -37,14 +40,19 @@ serve(async (req) => {
 
     if (challengesError) {
       console.error('Error fetching team challenges:', challengesError);
-      return new Response(JSON.stringify({ error: challengesError.message }), { status: 400 });
+      return new Response(
+        JSON.stringify({ error: challengesError.message }),
+        { status: 400 }
+      );
     }
 
-    // Group challenges by team and calculate points
+    // Group challenges by team and calculate points using the challenge multiplier.
     const teamPoints = new Map();
     teamChallenges.forEach(tc => {
       const teamId = tc.team_id;
-      const points = tc.challenges.earning_points || 0;
+      const basePoints = tc.challenges.earning_points || 0;
+      const multiplier = tc.multiplier || 1;
+      const points = basePoints * multiplier;
       const teamName = tc.teams.team_name;
 
       if (!teamPoints.has(teamId)) {

@@ -223,28 +223,11 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
           _currentLocation = initialPosition;
           _isInitializing = false;
         });
+        // Start the run only once using the initial position.
         _startRun(initialPosition);
       }
-
-      _locationSubscription?.cancel();
-      _locationSubscription = _locationService.trackLocation().listen(
-            (position) {
-          if (mounted && !_hasEnded) {
-            setState(() {
-              _currentLocation = position;
-            });
-            if (_isInitializing && position.accuracy < 20) {
-              _isInitializing = false;
-              _startRun(position);
-            }
-          }
-        },
-        onError: (error) {
-          debugPrint('Error tracking location: $error');
-        },
-      );
-
-      // Fallback timer in case GPS is slow
+      // Optionally, you can remove this extra subscription block since _startRun sets up its own listener.
+      // Timer fallback if needed:
       Timer(const Duration(seconds: 30), () {
         if (_isInitializing && mounted && _currentLocation != null) {
           _isInitializing = false;
@@ -255,6 +238,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage> {
       debugPrint('Error initializing run: $e');
     }
   }
+
 
   void _startRun(Position position) {
     if (!mounted) return;

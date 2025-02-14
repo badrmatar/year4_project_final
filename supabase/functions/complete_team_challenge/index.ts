@@ -78,7 +78,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    // Step 1: Get active team with proper error handling
+    // Step 1: Get active team membership
     const { data: teamMembership, error: teamError } = await supabase
       .from('team_memberships')
       .select('team_id')
@@ -96,10 +96,10 @@ serve(async (req: Request) => {
       );
     }
 
-    // Step 2: Get latest active challenge
+    // Step 2: Get latest active challenge for the team
     const { data: activeChallenge, error: challengeError } = await supabase
       .from('team_challenges')
-      .select('team_challenge_id')
+      .select('team_challenge_id, challenge_id, challenges (length)')
       .eq('team_id', teamMembership.team_id)
       .eq('iscompleted', false)
       .order('team_challenge_id', { ascending: false })
@@ -128,7 +128,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // 3) Insert user contribution
+    // Step 3: Insert user contribution
     const team_challenge_id = activeChallenge.team_challenge_id;
     const finalEndTime = end_time ?? new Date().toISOString();
 
@@ -163,7 +163,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Get challenge details and total team distance
+    // Step 4: Get challenge details and total team distance
     const { data: challengeData, error: challengeError2 } = await supabase
       .from('team_challenges')
       .select(`
@@ -197,10 +197,11 @@ serve(async (req: Request) => {
     let challengeCompleted = false;
 
     if (totalDistanceInKm >= requiredDistance) {
-      // Update team_challenge as completed
+      // Update team_challenge as completed (mark completion time)
+      const now = new Date();
       const { error: updateError } = await supabase
         .from('team_challenges')
-        .update({ iscompleted: true })
+        .update({ iscompleted: true, completed_at: now.toISOString() })
         .eq('team_challenge_id', team_challenge_id);
 
       if (updateError) {
@@ -213,6 +214,66 @@ serve(async (req: Request) => {
         );
       }
       challengeCompleted = true;
+
+      // ----- STREAK LOGIC START -----
+      // Fetch the team's streak info from teams table
+      const { data: teamData, error: teamDataError } = await supabase
+        .from('teams')
+        .select('streak_count, last_completed_date')
+        .eq('team_id', teamMembership.team_id)
+        .single();
+
+      if (teamDataError || !teamData) {
+        console.error('Error fetching team streak info:', teamDataError);
+      } else {
+        let { streak_count, last_completed_date } = teamData;
+        let newStreakCount = 1; // default streak if not consecutive
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        if (last_completed_date) {
+          const lastDate = new Date(last_completed_date);
+          if (
+            lastDate.getFullYear() === yesterday.getFullYear() &&
+            lastDate.getMonth() === yesterday.getMonth() &&
+            lastDate.getDate() === yesterday.getDate()
+          ) {
+            newStreakCount = streak_count + 1;
+          }
+        }
+
+        let bonus = 0;
+        if (newStreakCount >= 3) {
+          bonus = 50;
+          // Reset streak or modify as per your business logic:
+          newStreakCount = 0;
+        }
+
+        // Update the team's streak info
+        const { error: updateTeamError } = await supabase
+          .from('teams')
+          .update({
+            streak_count: newStreakCount,
+            last_completed_date: now.toISOString().split('T')[0], // store only date
+          })
+          .eq('team_id', teamMembership.team_id);
+
+        if (updateTeamError) {
+          console.error('Error updating team streak info:', updateTeamError);
+        }
+
+        // If bonus is awarded, update the challenge's bonus_points field
+        if (bonus > 0) {
+          const { error: bonusError } = await supabase
+            .from('team_challenges')
+            .update({ bonus_points: bonus })
+            .eq('team_challenge_id', team_challenge_id);
+          if (bonusError) {
+            console.error('Error updating bonus_points:', bonusError);
+          }
+        }
+      }
+      // ----- STREAK LOGIC END -----
     }
 
     // Return success with team_challenge_id and completion status

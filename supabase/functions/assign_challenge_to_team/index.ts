@@ -56,31 +56,28 @@ serve(async (req: Request) => {
 
     const team_id = teamMembership.team_id;
 
-    // Check if another team has already picked the challenge and it's still active
-    const { data: conflictingChallenge, error: conflictError } = await supabase
+    // NEW: Check if the team already has an active (incomplete) challenge
+    const { data: incompleteChallenges, error: incompleteError } = await supabase
       .from('team_challenges')
       .select('team_challenge_id')
-      .eq('challenge_id', challenge_id)
-      .eq('iscompleted', false)
-      .maybeSingle();
+      .eq('team_id', team_id)
+      .eq('iscompleted', false);
 
-    if (conflictError) {
+    if (incompleteError) {
       return new Response(
-        JSON.stringify({ error: 'Error checking active challenges for the same challenge.' }),
+        JSON.stringify({ error: 'Error checking active challenges.' }),
         { status: 500 }
       );
     }
 
-    if (conflictingChallenge) {
+    if (incompleteChallenges && incompleteChallenges.length > 0) {
       return new Response(
-        JSON.stringify({
-          error: 'This challenge has already been picked by another team and is still active.',
-        }),
+        JSON.stringify({ error: 'Team already has an active challenge for today.' }),
         { status: 400 }
       );
     }
 
-    // Check if a team_challenge for the same team and challenge already exists
+    // Check if the same challenge is already assigned to the team
     const { data: existingChallenge, error: challengeError } = await supabase
       .from('team_challenges')
       .select('team_challenge_id')
@@ -102,7 +99,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Check if user is already participating in another active team_challenge
+    // Check if user is already participating in another active team challenge (via user_contributions)
     const { data: activeChallenges, error: activeError } = await supabase
       .from('user_contributions')
       .select('user_contribution_id')
@@ -123,13 +120,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // Create a new team_challenge
+    // Create a new team_challenge record
     const { data: newTeamChallenge, error: createError } = await supabase
       .from('team_challenges')
       .insert({
         team_id,
         challenge_id,
-        multiplier: 1,
+        bonus: false,
         iscompleted: false,
       })
       .select('team_challenge_id')
