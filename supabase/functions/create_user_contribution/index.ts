@@ -167,6 +167,7 @@ serve(async (req: Request) => {
     // In create_user_contribution/index.ts, update the completion section:
 
     // In create_user_contribution/index.ts
+    // In create_user_contribution/index.ts
     if (isCompleted) {
       console.log('Challenge completed! Updating status and streak...');
 
@@ -180,17 +181,18 @@ serve(async (req: Request) => {
         console.error('Error marking challenge as completed:', updateError);
       }
 
-      // Update streak directly
+      // Update streak and check for bonus
       const today = new Date().toISOString().split('T')[0];
 
       const { data: team, error: teamError } = await supabase
         .from('teams')
-        .select('current_streak, last_completion_date')
+        .select('current_streak, last_completion_date, streak_bonus_points')
         .eq('team_id', teamMembership.team_id)
         .single();
 
       if (!teamError && team) {
         let newStreak = 1; // Default for first completion or broken streak
+        let newBonusPoints = team.streak_bonus_points || 0;
 
         if (team.last_completion_date) {
           const lastCompletion = new Date(team.last_completion_date);
@@ -202,21 +204,33 @@ serve(async (req: Request) => {
             newStreak = team.current_streak; // Keep current streak
           } else if (daysDifference === 1) {
             newStreak = team.current_streak + 1; // Increment streak
+
+            // Award bonus every 3 days
+            if (newStreak % 3 === 0) {
+              newBonusPoints += 100;
+              console.log('Awarding 100 bonus points for 3-day streak!');
+            }
           }
         }
 
+        // Update team streak and bonus points in a single update
         const { error: streakError } = await supabase
           .from('teams')
           .update({
             current_streak: newStreak,
-            last_completion_date: today
+            last_completion_date: today,
+            streak_bonus_points: newBonusPoints
           })
           .eq('team_id', teamMembership.team_id);
 
         if (streakError) {
-          console.error('Error updating streak:', streakError);
+          console.error('Error updating team:', streakError);
         } else {
-          console.log('Successfully updated streak to:', newStreak);
+          console.log('Successfully updated team:', {
+            streak: newStreak,
+            bonusPoints: newBonusPoints,
+            team_id: teamMembership.team_id
+          });
         }
       } else {
         console.error('Error fetching team data:', teamError);
