@@ -25,23 +25,13 @@ class _ChallengesPageState extends State<ChallengesPage> {
 
   String _getTimeRemaining(DateTime startTime, int? duration) {
     if (duration == null) return 'N/A';
-
     final endTime = startTime.add(Duration(minutes: duration));
     final now = DateTime.now().toUtc();
-
-    if (now.isAfter(endTime)) {
-      return 'Expired';
-    }
-
+    if (now.isAfter(endTime)) return 'Expired';
     final remaining = endTime.difference(now);
     final hours = remaining.inHours;
     final minutes = remaining.inMinutes % 60;
-
-    if (hours > 0) {
-      return '${hours}h ${minutes}m';
-    } else {
-      return '${minutes}m';
-    }
+    return hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
   }
 
   Future<Map<String, dynamic>> _fetchChallengesAndTeamStatus() async {
@@ -52,38 +42,41 @@ class _ChallengesPageState extends State<ChallengesPage> {
     final endOfDay = startOfDay.add(const Duration(days: 1));
 
     try {
-      // Get today's challenges
+      // Fetch today's challenges; the query returns a List.
       final challengesResponse = await supabase
           .from('challenges')
           .select()
           .gte('start_time', startOfDay.toIso8601String())
           .lt('start_time', endOfDay.toIso8601String());
+      final List challengesList = challengesResponse as List;
 
-      // Get user's active team
+      // Fetch the user's active team membership with joined team details.
+      // maybeSingle() returns a Map or null.
       final teamMembershipResponse = await supabase
           .from('team_memberships')
-          .select('team_id, teams(team_name)')
+          .select('team_id, teams(team_name, current_streak)')
           .eq('user_id', user.id)
           .filter('date_left', 'is', null)
           .limit(1)
-          .single();
-
+          .maybeSingle();
       if (teamMembershipResponse == null) {
         throw Exception('No active team membership found');
       }
+      final Map teamMembershipData = teamMembershipResponse;
+      debugPrint('Team membership response: $teamMembershipData');
+      final teamId = teamMembershipData['team_id'];
 
-      final teamId = teamMembershipResponse['team_id'];
-
-      // Get team's active challenges with total distance and duo distance.
-      final activeTeamChallenges = await supabase
+      // Fetch the team's active challenges with user contributions.
+      final activeTeamChallengesResponse = await supabase
           .from('team_challenges')
-          .select('*, user_contributions ( distance_covered, journey_type )')
+          .select('*, user_contributions(distance_covered, journey_type)')
           .eq('team_id', teamId)
           .eq('iscompleted', false)
           .order('team_challenge_id', ascending: false);
+      final List activeTeamChallengesList = activeTeamChallengesResponse as List;
 
-      // Calculate total and duo distance for each team challenge.
-      final teamChallengesWithDistance = activeTeamChallenges.map((tc) {
+      // For each team challenge, calculate the total and duo distances.
+      final teamChallengesWithDistance = activeTeamChallengesList.map((tc) {
         final contributions = tc['user_contributions'] as List;
         final totalDistance = contributions.fold<double>(
           0,
@@ -102,13 +95,14 @@ class _ChallengesPageState extends State<ChallengesPage> {
         };
       }).toList();
 
-      debugPrint('Found ${challengesResponse.length} challenges for today');
+      debugPrint('Found ${challengesList.length} challenges for today');
       debugPrint('Team ID: $teamId');
       debugPrint('Active team challenges: ${teamChallengesWithDistance.length}');
 
       return {
-        'challenges': challengesResponse,
+        'challenges': challengesList,
         'teamId': teamId,
+        'teamMembership': teamMembershipData,
         'activeTeamChallenge': teamChallengesWithDistance.isNotEmpty
             ? teamChallengesWithDistance.first
             : null,
@@ -141,102 +135,133 @@ class _ChallengesPageState extends State<ChallengesPage> {
               .toList();
           final activeTeamChallenge = data['activeTeamChallenge'];
 
-          return ListView.builder(
-            itemCount: challenges.length,
-            itemBuilder: (context, index) {
-              final challenge = challenges[index];
-              final isActiveChallenge = activeTeamChallenge != null &&
-                  activeTeamChallenge['challenge_id'] == challenge.challengeId;
+          // Extract current streak from the team membership.
+          final teamMembership = data['teamMembership'];
+          int currentStreak = 0;
+          if (teamMembership != null && teamMembership['teams'] != null) {
+            if (teamMembership['teams'] is List) {
+              final teamsList = teamMembership['teams'] as List;
+              if (teamsList.isNotEmpty && teamsList[0]['current_streak'] != null) {
+                currentStreak = teamsList[0]['current_streak'];
+              }
+            } else if (teamMembership['teams'] is Map) {
+              currentStreak = teamMembership['teams']['current_streak'] ?? 0;
+            }
+          }
 
-              // Safely retrieve the total distance and duo distance.
-              final totalDistance = isActiveChallenge
-                  ? (((activeTeamChallenge['total_distance'] as num?)?.toDouble()) ?? 0.0) / 1000
-                  : 0.0;
-              final duoDistance = isActiveChallenge
-                  ? (((activeTeamChallenge['duo_distance'] as num?)?.toDouble()) ?? 0.0) / 1000
-                  : 0.0;
-              // Retrieve the multiplier, defaulting to 1 if null.
-              final multiplier = isActiveChallenge
-                  ? ((activeTeamChallenge['multiplier'] as num?)?.toInt() ?? 1)
-                  : 1;
-
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: ListTile(
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Challenge #${challenge.challengeId}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      if (isActiveChallenge)
-                        Text(
-                          '${totalDistance.toStringAsFixed(2)} km',
-                          style: TextStyle(
-                            color: Colors.green[700],
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                    ],
+          return Column(
+            children: [
+              // Display the team's current streak.
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                color: Colors.grey.shade200,
+                child: Text(
+                  'Team Streak: $currentStreak day${currentStreak == 1 ? '' : 's'}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: challenge.difficulty.toLowerCase() == 'easy'
-                              ? Colors.lightBlue.shade100
-                              : challenge.difficulty.toLowerCase() == 'medium'
-                              ? Colors.yellow.shade100
-                              : Colors.orange.shade100,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'Difficulty: ${challenge.difficulty}',
-                          style: TextStyle(
-                            color: challenge.difficulty.toLowerCase() == 'easy'
-                                ? Colors.blue.shade900
-                                : challenge.difficulty.toLowerCase() == 'medium'
-                                ? Colors.yellow.shade900
-                                : Colors.orange.shade900,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Points: ${challenge.earningPoints}'),
-                      Text(
-                          'Time Remaining: ${_getTimeRemaining(challenge.startTime, challenge.duration)}'),
-                      Text(challenge.formattedDistance),
-                      if (isActiveChallenge)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            'Duo: ${duoDistance.toStringAsFixed(2)} km | Multiplier: $multiplier',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ),
-                    ],
-                  ),
-                  trailing: ElevatedButton(
-                    onPressed: activeTeamChallenge != null && !isActiveChallenge
-                        ? null // Disable button if team has a different active challenge
-                        : () => _handleChallengeAction(challenge, activeTeamChallenge, context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isActiveChallenge ? Colors.lightGreen : null,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    child: Text(
-                      isActiveChallenge ? 'Continue Run' : 'Start Run',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ),
+                  textAlign: TextAlign.center,
                 ),
-              );
-            },
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: challenges.length,
+                  itemBuilder: (context, index) {
+                    final challenge = challenges[index];
+                    final isActiveChallenge = activeTeamChallenge != null &&
+                        activeTeamChallenge['challenge_id'] == challenge.challengeId;
+
+                    // Safely retrieve total and duo distances.
+                    final totalDistance = isActiveChallenge
+                        ? (((activeTeamChallenge['total_distance'] as num?)?.toDouble()) ?? 0.0) / 1000
+                        : 0.0;
+                    final duoDistance = isActiveChallenge
+                        ? (((activeTeamChallenge['duo_distance'] as num?)?.toDouble()) ?? 0.0) / 1000
+                        : 0.0;
+                    final multiplier = isActiveChallenge
+                        ? ((activeTeamChallenge['multiplier'] as num?)?.toInt() ?? 1)
+                        : 1;
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: ListTile(
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Challenge #${challenge.challengeId}',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            if (isActiveChallenge)
+                              Text(
+                                '${totalDistance.toStringAsFixed(2)} km',
+                                style: TextStyle(
+                                  color: Colors.green[700],
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: challenge.difficulty.toLowerCase() == 'easy'
+                                    ? Colors.lightBlue.shade100
+                                    : challenge.difficulty.toLowerCase() == 'medium'
+                                    ? Colors.yellow.shade100
+                                    : Colors.orange.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Difficulty: ${challenge.difficulty}',
+                                style: TextStyle(
+                                  color: challenge.difficulty.toLowerCase() == 'easy'
+                                      ? Colors.blue.shade900
+                                      : challenge.difficulty.toLowerCase() == 'medium'
+                                      ? Colors.yellow.shade900
+                                      : Colors.orange.shade900,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text('Points: ${challenge.earningPoints}'),
+                            Text('Time Remaining: ${_getTimeRemaining(challenge.startTime, challenge.duration)}'),
+                            Text(challenge.formattedDistance),
+                            if (isActiveChallenge)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'Duo: ${duoDistance.toStringAsFixed(2)} km | Multiplier: $multiplier',
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ),
+                          ],
+                        ),
+                        trailing: ElevatedButton(
+                          onPressed: activeTeamChallenge != null && !isActiveChallenge
+                              ? null
+                              : () => _handleChallengeAction(challenge, activeTeamChallenge, context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isActiveChallenge ? Colors.lightGreen : null,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          ),
+                          child: Text(
+                            isActiveChallenge ? 'Continue Run' : 'Start Run',
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -245,7 +270,6 @@ class _ChallengesPageState extends State<ChallengesPage> {
 
   Future<void> _handleChallengeAction(Challenge challenge, dynamic activeTeamChallenge, BuildContext context) async {
     if (activeTeamChallenge != null) {
-      // If team already has an active challenge, navigate to journey type selection
       Navigator.pushNamed(
         context,
         '/journey_type',
@@ -256,8 +280,6 @@ class _ChallengesPageState extends State<ChallengesPage> {
       );
       return;
     }
-
-    // Otherwise, assign new challenge to team first.
     final success = await _assignChallengeToTeam(challenge.challengeId, context);
     if (success) {
       Navigator.pushNamed(
@@ -271,7 +293,6 @@ class _ChallengesPageState extends State<ChallengesPage> {
   Future<bool> _assignChallengeToTeam(int challengeId, BuildContext context) async {
     final user = Provider.of<UserModel>(context, listen: false);
     final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/assign_challenge_to_team';
-
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -279,12 +300,8 @@ class _ChallengesPageState extends State<ChallengesPage> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
         },
-        body: jsonEncode({
-          'user_id': user.id,
-          'challenge_id': challengeId,
-        }),
+        body: jsonEncode({'user_id': user.id, 'challenge_id': challengeId}),
       );
-
       if (response.statusCode == 200) {
         setState(() {
           _challengesData = _fetchChallengesAndTeamStatus();
