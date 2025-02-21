@@ -56,7 +56,21 @@ serve(async (req: Request) => {
 
     const team_id = teamMembership.team_id;
 
-    // Check if another team has already picked the challenge and it's still active
+    // Get the current challenge's start time
+    const { data: challengeData, error: challengeTimeError } = await supabase
+      .from('challenges')
+      .select('start_time')
+      .eq('challenge_id', challenge_id)
+      .single();
+
+    if (challengeTimeError || !challengeData) {
+      return new Response(
+        JSON.stringify({ error: 'Challenge not found.' }),
+        { status: 404 }
+      );
+    }
+
+    // Check if another team has already picked this specific challenge and it's still active
     const { data: conflictingChallenge, error: conflictError } = await supabase
       .from('team_challenges')
       .select('team_challenge_id')
@@ -66,7 +80,7 @@ serve(async (req: Request) => {
 
     if (conflictError) {
       return new Response(
-        JSON.stringify({ error: 'Error checking active challenges for the same challenge.' }),
+        JSON.stringify({ error: 'Error checking active challenges.' }),
         { status: 500 }
       );
     }
@@ -80,45 +94,27 @@ serve(async (req: Request) => {
       );
     }
 
-    // Check if a team_challenge for the same team and challenge already exists
-    const { data: existingChallenge, error: challengeError } = await supabase
+    // Check if the team has any active challenges FROM TODAY
+    const startOfDay = new Date(challengeData.start_time);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const { data: activeTeamChallenges, error: activeError } = await supabase
       .from('team_challenges')
-      .select('team_challenge_id')
+      .select('team_challenge_id, challenges!inner(start_time)')
       .eq('team_id', team_id)
-      .eq('challenge_id', challenge_id)
-      .maybeSingle();
-
-    if (challengeError) {
-      return new Response(
-        JSON.stringify({ error: 'Error checking existing challenges.' }),
-        { status: 500 }
-      );
-    }
-
-    if (existingChallenge) {
-      return new Response(
-        JSON.stringify({ error: 'This challenge is already assigned to the team.' }),
-        { status: 400 }
-      );
-    }
-
-    // Check if user is already participating in another active team_challenge
-    const { data: activeChallenges, error: activeError } = await supabase
-      .from('user_contributions')
-      .select('user_contribution_id')
-      .eq('user_id', user_id)
-      .eq('active', true);
+      .eq('iscompleted', false)
+      .gte('challenges.start_time', startOfDay.toISOString());
 
     if (activeError) {
       return new Response(
-        JSON.stringify({ error: 'Error checking user contributions.' }),
+        JSON.stringify({ error: 'Error checking team challenges.' }),
         { status: 500 }
       );
     }
 
-    if (activeChallenges && activeChallenges.length > 0) {
+    if (activeTeamChallenges && activeTeamChallenges.length > 0) {
       return new Response(
-        JSON.stringify({ error: 'User is already part of an active team challenge.' }),
+        JSON.stringify({ error: 'Team already has an active challenge for today.' }),
         { status: 400 }
       );
     }
