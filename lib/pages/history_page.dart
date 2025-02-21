@@ -12,7 +12,8 @@ class HistoryPage extends StatefulWidget {
   _HistoryPageState createState() => _HistoryPageState();
 }
 
-class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStateMixin {
+class _HistoryPageState extends State<HistoryPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool _isLoading = true;
   List<Map<String, dynamic>> _teamChallenges = [];
@@ -69,7 +70,8 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
       if (mounted) {
         setState(() {
           _teamChallenges = List<Map<String, dynamic>>.from(teamResponse);
-          _personalContributions = List<Map<String, dynamic>>.from(personalResponse);
+          _personalContributions =
+          List<Map<String, dynamic>>.from(personalResponse);
           _isLoading = false;
         });
       }
@@ -160,7 +162,8 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
         final contribution = _personalContributions[index];
         final challenge = contribution['team_challenges']?['challenges'];
         final startTime = DateTime.parse(contribution['start_time']);
-        final distance = (contribution['distance_covered'] as num?)?.toDouble() ?? 0.0;
+        final distance =
+            (contribution['distance_covered'] as num?)?.toDouble() ?? 0.0;
         final routeData = contribution['route']; // This field holds the saved route
 
         return Card(
@@ -215,9 +218,15 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
     return Scaffold(
       backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
-        elevation: 0, // Remove any shadow
+        elevation: 0,
         backgroundColor: const Color(0xFF1F1F1F),
         iconTheme: const IconThemeData(color: Colors.white),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pushReplacementNamed(context, '/home');
+          },
+        ),
         title: const Text(
           'History',
           style: TextStyle(color: Colors.white),
