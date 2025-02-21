@@ -1,10 +1,9 @@
-// lib/pages/history_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/user.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'run_map_view.dart';  // Import the map view widget
+
+import '../models/user.dart';
+import 'run_map_view.dart'; // For viewing the route
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({Key? key}) : super(key: key);
@@ -51,7 +50,7 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
           ''')
           .eq('user_id', user.id);
 
-      // Fetch personal contributions (including the new "route" field)
+      // Fetch personal contributions (including the "route" field)
       final personalResponse = await supabase
           .from('user_contributions')
           .select('''
@@ -86,7 +85,12 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
 
   Widget _buildTeamChallenges() {
     if (_teamChallenges.isEmpty) {
-      return const Center(child: Text('No team challenges found'));
+      return const Center(
+        child: Text(
+          'No team challenges found',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
     }
 
     return ListView.builder(
@@ -97,19 +101,39 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
         final challenges = team?['team_challenges'] ?? [];
 
         return Card(
+          color: Colors.white.withOpacity(0.05),
           margin: const EdgeInsets.all(8.0),
           child: ExpansionTile(
-            title: Text('Team: ${team?['team_name'] ?? 'Unknown Team'}'),
+            iconColor: Colors.white70,
+            collapsedIconColor: Colors.white70,
+            textColor: Colors.white,
+            collapsedTextColor: Colors.white,
+            title: Text(
+              'Team: ${team?['team_name'] ?? 'Unknown Team'}',
+              style: const TextStyle(color: Colors.white),
+            ),
             children: challenges.map<Widget>((challenge) {
               final challengeDetails = challenge['challenges'];
               return ListTile(
-                title: Text('Difficulty: ${challengeDetails?['difficulty'] ?? 'Unknown'}'),
+                title: Text(
+                  'Difficulty: ${challengeDetails?['difficulty'] ?? 'Unknown'}',
+                  style: const TextStyle(color: Colors.white),
+                ),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Distance: ${challengeDetails?['length']?.toString() ?? 'Unknown'} km'),
-                    Text('Points: ${challengeDetails?['earning_points']?.toString() ?? 'Unknown'}'),
-                    Text('Status: ${challenge['iscompleted'] ? 'Completed' : 'Incomplete'}'),
+                    Text(
+                      'Distance: ${challengeDetails?['length']?.toString() ?? 'Unknown'} km',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    Text(
+                      'Points: ${challengeDetails?['earning_points']?.toString() ?? 'Unknown'}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    Text(
+                      'Status: ${challenge['iscompleted'] ? 'Completed' : 'Incomplete'}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
                   ],
                 ),
               );
@@ -122,7 +146,12 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
 
   Widget _buildPersonalContributions() {
     if (_personalContributions.isEmpty) {
-      return const Center(child: Text('No personal contributions found'));
+      return const Center(
+        child: Text(
+          'No personal contributions found',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
     }
 
     return ListView.builder(
@@ -135,16 +164,29 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
         final routeData = contribution['route']; // This field holds the saved route
 
         return Card(
+          color: Colors.white.withOpacity(0.05),
           margin: const EdgeInsets.all(8.0),
           child: ListTile(
-            title: Text('Run on ${startTime.toLocal().toString().split('.')[0]}'),
+            title: Text(
+              'Run on ${startTime.toLocal().toString().split('.')[0]}',
+              style: const TextStyle(color: Colors.white),
+            ),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Distance: ${(distance / 1000).toStringAsFixed(2)} km'),
+                Text(
+                  'Distance: ${(distance / 1000).toStringAsFixed(2)} km',
+                  style: const TextStyle(color: Colors.white70),
+                ),
                 if (challenge != null) ...[
-                  Text('Difficulty: ${challenge['difficulty']}'),
-                  Text('Points: ${challenge['earning_points']}'),
+                  Text(
+                    'Difficulty: ${challenge['difficulty']}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'Points: ${challenge['earning_points']}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
                 ],
               ],
             ),
@@ -171,10 +213,20 @@ class _HistoryPageState extends State<HistoryPage> with SingleTickerProviderStat
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
-        title: const Text('History'),
+        elevation: 0, // Remove any shadow
+        backgroundColor: const Color(0xFF1F1F1F),
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          'History',
+          style: TextStyle(color: Colors.white),
+        ),
         bottom: TabBar(
           controller: _tabController,
+          indicatorColor: Colors.purpleAccent,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.grey,
           tabs: const [
             Tab(text: 'Team Accomplishments'),
             Tab(text: 'Personal Contributions'),

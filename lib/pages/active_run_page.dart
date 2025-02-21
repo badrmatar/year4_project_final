@@ -100,7 +100,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       }
     });
 
-    Timer(const Duration(seconds: 3000), () {
+    Timer(const Duration(seconds: 30), () {
       if (_isInitializing && mounted && _currentLocation != null) {
         _isInitializing = false;
         _startRun(_currentLocation!);

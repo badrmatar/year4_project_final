@@ -3,14 +3,18 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+
 class LeagueRoomPage extends StatefulWidget {
   final int userId;
 
+
   const LeagueRoomPage({Key? key, required this.userId}) : super(key: key);
+
 
   @override
   _LeagueRoomPageState createState() => _LeagueRoomPageState();
 }
+
 
 class _LeagueRoomPageState extends State<LeagueRoomPage> {
   bool _isLoading = true;
@@ -19,33 +23,38 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
   List<Map<String, dynamic>> _leagueTeams = [];
   int? _ownerId;
 
+
   @override
   void initState() {
     super.initState();
     _fetchLeagueRoomData();
   }
 
+
+  // Clean team name by removing trailing numbers.
   String _getCleanTeamName(String teamName) {
     final regex = RegExp(r'^(.*?)(?:\s*\d+)?$');
     final match = regex.firstMatch(teamName);
     return match != null ? match.group(1)?.trim() ?? teamName : teamName;
   }
 
+
   Future<void> _fetchLeagueRoomData() async {
     setState(() => _isLoading = true);
+
 
     try {
       final leagueRoomId = await _getLeagueRoomId(widget.userId);
 
+
       if (leagueRoomId == null) {
         setState(() {
           _isLoading = false;
-          _leagueRoomId = null;
         });
         return;
       }
 
-      // Get team points
+
       final pointsResponse = await http.post(
         Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/get_team_points'),
         headers: {
@@ -55,7 +64,6 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
         body: jsonEncode({'league_room_id': leagueRoomId}),
       );
 
-      debugPrint('Points response: ${pointsResponse.body}');
 
       final membersResponse = await http.post(
         Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/get_league_teams'),
@@ -66,14 +74,17 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
         body: jsonEncode({'league_room_id': leagueRoomId}),
       );
 
-      debugPrint('Members response: ${membersResponse.body}');
 
       if (pointsResponse.statusCode == 200 && membersResponse.statusCode == 200) {
         final pointsData = jsonDecode(pointsResponse.body);
         final membersData = jsonDecode(membersResponse.body);
 
-        final pointsList = List<Map<String, dynamic>>.from(pointsData['data'] ?? []);
-        final membersList = List<Map<String, dynamic>>.from(membersData['teams'] ?? []);
+
+        final pointsList =
+        List<Map<String, dynamic>>.from(pointsData['data'] ?? []);
+        final membersList =
+        List<Map<String, dynamic>>.from(membersData['teams'] ?? []);
+
 
         List<Map<String, dynamic>> teamsWithPoints = membersList.map((memberTeam) {
           final matchingPoints = pointsList.firstWhere(
@@ -81,20 +92,18 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
             orElse: () => {'total_points': 0, 'completed_challenges': 0},
           );
 
-          // Safely extract current_streak from the team data
+
           int? currentStreak;
           if (memberTeam['teams'] != null) {
             if (memberTeam['teams'] is Map) {
               currentStreak = memberTeam['teams']['current_streak'];
-            } else if (memberTeam['teams'] is List && memberTeam['teams'].isNotEmpty) {
+            } else if (memberTeam['teams'] is List &&
+                memberTeam['teams'].isNotEmpty) {
               currentStreak = memberTeam['teams'][0]['current_streak'];
             }
           }
-          currentStreak ??= 0; // Default to 0 if null
+          currentStreak ??= 0;
 
-          debugPrint('Processing team ${memberTeam['team_id']}:');
-          debugPrint('  Streak from DB: $currentStreak');
-          debugPrint('  Points: ${matchingPoints['total_points']}');
 
           return {
             ...matchingPoints,
@@ -102,6 +111,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
             'current_streak': currentStreak,
           };
         }).toList();
+
 
         setState(() {
           _leagueRoomId = leagueRoomId;
@@ -124,6 +134,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     }
   }
 
+
   Future<int?> _getLeagueRoomId(int userId) async {
     final url =
         '${dotenv.env['SUPABASE_URL']}/functions/v1/get_active_league_room_id';
@@ -131,6 +142,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
     };
+
 
     try {
       final response = await http.post(
@@ -148,24 +160,34 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     }
   }
 
+
   Widget _buildStreakIndicator(int? streak) {
     final actualStreak = streak ?? 0;
-    final color = actualStreak > 0 ? Colors.orange.shade700 : Colors.grey.shade600;
-    debugPrint("Building streak indicator for streak: $actualStreak");
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
+    return Container(
+      width: 70,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: actualStreak > 0 ? Colors.orange.withOpacity(0.2) : Colors.grey.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.local_fire_department, size: 16, color: color),
-          const SizedBox(width: 4),
-          Text(
-            "$actualStreak day${actualStreak != 1 ? 's' : ''}",
-            style: TextStyle(
-              fontSize: 13,
-              color: color,
-              fontWeight: actualStreak > 0 ? FontWeight.w500 : FontWeight.normal,
+          Icon(
+            Icons.local_fire_department,
+            size: 12,
+            color: actualStreak > 0 ? Colors.orange : Colors.grey.shade400,
+          ),
+          const SizedBox(width: 2),
+          Flexible(
+            child: Text(
+              "$actualStreak d",
+              style: TextStyle(
+                fontSize: 12,
+                color: actualStreak > 0 ? Colors.orange : Colors.grey.shade400,
+                fontWeight: actualStreak > 0 ? FontWeight.w500 : FontWeight.normal,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -173,85 +195,70 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     );
   }
 
+
   Widget _buildLeagueRoomDetails() {
-    final bool isOwner = _ownerId == widget.userId;
-    // Sort teams based on total points.
-    _leagueTeams.sort(
-          (a, b) => (b['total_points'] ?? 0).compareTo(a['total_points'] ?? 0),
-    );
+    _leagueTeams.sort((a, b) =>
+        (b['total_points'] ?? 0).compareTo(a['total_points'] ?? 0));
+
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Header row for the league room details
         Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Text(
-            _leagueRoomName ?? "League Room",
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          padding: const EdgeInsets.all(16.0),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(width: 32),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    "TEAM",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade300,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      "PTS",
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade300,
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      "STREAK",
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade300,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        // Header row including "STREAK" column.
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          color: Colors.grey.shade100,
-          child: Row(
-            children: [
-              const SizedBox(width: 32),
-              Expanded(
-                flex: 3,
-                child: Text(
-                  "TEAM",
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    "CHAL",
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    "PTS",
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    "STREAK",
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
         Expanded(
           child: ListView.builder(
             itemCount: _leagueTeams.length,
-            padding: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             itemBuilder: (context, index) {
               final team = _leagueTeams[index];
               final bool isTopThree = index < 3;
@@ -262,79 +269,70 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
                   [];
               final memberNames = members.join(', ');
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
                     children: [
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 32,
-                            child: Text(
-                              "${index + 1}",
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isTopThree ? Colors.black : Colors.grey.shade600,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
+                      Container(
+                        width: 32,
+                        child: Text(
+                          "${index + 1}",
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: isTopThree ? Colors.white : Colors.grey.shade600,
                           ),
-                          Expanded(
-                            flex: 3,
-                            child: Text(
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
                               _getCleanTeamName(team['team_name'] ?? ''),
                               style: TextStyle(
-                                fontSize: 14,
+                                fontSize: 16,
                                 fontWeight: isTopThree ? FontWeight.w600 : FontWeight.normal,
+                                color: Colors.white,
                               ),
                             ),
-                          ),
-                          Expanded(
-                            child: Center(
-                              child: Text(
-                                "${team['completed_challenges'] ?? 0}",
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Center(
-                              child: Text(
-                                "${team['total_points'] ?? 0}",
+                            if (memberNames.isNotEmpty)
+                              Text(
+                                memberNames,
                                 style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isTopThree ? Colors.amber.shade700 : null,
+                                  fontSize: 13,
+                                  color: Colors.grey.shade400,
                                 ),
                               ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Center(
-                              child: _buildStreakIndicator(team['current_streak'] ?? 0),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                      if (memberNames.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8.0, left: 32),
+                      Expanded(
+                        child: Center(
                           child: Text(
-                            memberNames,
+                            "${team['total_points'] ?? 0}",
                             style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey.shade700,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isTopThree ? Colors.amber.shade700 : Colors.white,
                             ),
                           ),
                         ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _buildStreakIndicator(team['current_streak'] ?? 0),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -342,24 +340,24 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
             },
           ),
         ),
-        if (isOwner)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Colors.grey.shade200)),
-            ),
-            child: Center(
-              child: ElevatedButton(
-                onPressed: _handleEndLeague,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        if (_ownerId == widget.userId)
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: ElevatedButton(
+              onPressed: _handleEndLeague,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFB832FA),
+                minimumSize: const Size(double.infinity, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  'End League',
-                  style: TextStyle(fontSize: 14, color: Colors.white),
+              ),
+              child: const Text(
+                'End League',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
                 ),
               ),
             ),
@@ -367,6 +365,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
       ],
     );
   }
+
 
   Future<void> _handleEndLeague() async {
     if (_leagueRoomId == null) return;
@@ -409,19 +408,47 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
-        title: const Text("League Room"),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pushReplacementNamed(context, '/home');
+          },
+
+
+        ),
+        title: const Text("League Room", style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1F1F1F),
+        iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _leagueRoomId == null
-          ? const Center(
-        child: Text(
-          "No active league room found.",
-          style: TextStyle(fontSize: 18),
+          : _leagueTeams.isEmpty
+          ? Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.group_off,
+              size: 64,
+              color: Colors.grey.shade600,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "No active league room found",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey.shade300,
+              ),
+            ),
+          ],
         ),
       )
           : _buildLeagueRoomDetails(),
