@@ -17,15 +17,9 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _handleLogin() async {
     if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
-
-      bool success = await _authService.userLogin(context, _email, _password);
-
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = true);
+      final success = await _authService.userLogin(context, _email, _password);
+      setState(() => _isLoading = false);
 
       if (success && mounted) {
         Navigator.pushReplacementNamed(context, '/home');
@@ -72,11 +66,8 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 keyboardType: TextInputType.emailAddress,
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if (value == null || value.isEmpty || !value.contains('@')) {
                     return 'Please enter a valid email';
-                  }
-                  if (!value.contains('@')) {
-                    return 'Please enter a valid email address';
                   }
                   return null;
                 },
@@ -110,7 +101,6 @@ class _LoginPageState extends State<LoginPage> {
                 },
               ),
               const SizedBox(height: 32.0),
-              // Login Button
               ElevatedButton(
                 onPressed: _handleLogin,
                 child: const Text('Login'),
