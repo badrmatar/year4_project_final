@@ -31,7 +31,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
 
   @protected
   Position? get currentLocation => _currentLocation;
-
   @protected
   Position? _startLocation;
   @protected
@@ -79,6 +78,25 @@ class ActiveRunPageState extends State<ActiveRunPage> {
   }
 
   Future<void> _initializeRun() async {
+    // Check for location permissions before proceeding.
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      permission = await Geolocator.requestPermission();
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
+        // If permission is still not granted, show a message and return.
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Location permission not granted. Please allow location access to start run.'),
+          ),
+        );
+        return;
+      }
+    }
+
+    // Get the initial location.
     final initialPosition = await locationService.getCurrentLocation();
     if (initialPosition != null) {
       setState(() {
@@ -90,16 +108,36 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       }
     }
 
-    _locationSubscription = locationService.trackLocation().listen((newPosition) {
-      if (mounted) {
-        setState(() => _currentLocation = newPosition);
-        if (_isInitializing && newPosition.accuracy < 20) {
-          _isInitializing = false;
-          _startRun(newPosition);
+    // Subscribe to the location stream with error handling.
+    _locationSubscription = locationService.trackLocation().listen(
+          (newPosition) {
+        if (mounted) {
+          setState(() => _currentLocation = newPosition);
+          if (_isInitializing && newPosition.accuracy < 25) {
+            _isInitializing = false;
+            _startRun(newPosition);
+          }
         }
-      }
-    });
+      },
+      onError: (error) async {
+        debugPrint('Location stream error: $error');
+        // Re-check permission if an error occurs.
+        LocationPermission newPermission = await Geolocator.checkPermission();
+        if (newPermission == LocationPermission.denied ||
+            newPermission == LocationPermission.deniedForever) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Location permission is required to start a run.')),
+          );
+        } else {
+          // If permission is now granted, cancel the old subscription and reinitialize.
+          _locationSubscription?.cancel();
+          _initializeRun();
+        }
+      },
+    );
 
+    // Fallback: If after 30 seconds we are still initializing, start with the last known location.
     Timer(const Duration(seconds: 30), () {
       if (_isInitializing && mounted && _currentLocation != null) {
         _isInitializing = false;
@@ -130,6 +168,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       }
     });
 
+    // Start listening to location updates for the run.
     locationService.trackLocation().listen((newPosition) {
       if (!_isTracking) return;
 
@@ -187,7 +226,8 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     }
   }
 
-  double _calculateDistance(double startLat, double startLng, double endLat, double endLng) {
+  double _calculateDistance(
+      double startLat, double startLng, double endLat, double endLng) {
     const earthRadius = 6371000.0;
     final dLat = (endLat - startLat) * (pi / 180);
     final dLng = (endLng - startLng) * (pi / 180);
@@ -231,8 +271,12 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       }
 
       final distance = double.parse(_distanceCovered.toStringAsFixed(2));
-      final startTime = (_startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
-      final endTime = (_endLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
+      final startTime = (_startLocation!.timestamp ?? DateTime.now())
+          .toUtc()
+          .toIso8601String();
+      final endTime = (_endLocation!.timestamp ?? DateTime.now())
+          .toUtc()
+          .toIso8601String();
 
       final routeJson = _route.map((point) => {
         'latitude': point.latitude,
@@ -253,7 +297,8 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       });
 
       final response = await http.post(
-        Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
+        Uri.parse(
+            '${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
@@ -268,7 +313,8 @@ class ActiveRunPageState extends State<ActiveRunPage> {
         if (data != null) {
           bool hasChallenge = false;
 
-          if (data['total_distance_km'] != null && data['required_distance_km'] != null) {
+          if (data['total_distance_km'] != null &&
+              data['required_distance_km'] != null) {
             hasChallenge = true;
             _showChallengeStatus(data);
           } else {
@@ -347,8 +393,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-            'Run saved successfully! Distance: ${(distance / 1000).toStringAsFixed(2)} km'
-        ),
+            'Run saved successfully! Distance: ${(distance / 1000).toStringAsFixed(2)} km'),
         duration: const Duration(seconds: 3),
       ),
     );
