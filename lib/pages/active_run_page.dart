@@ -78,27 +78,27 @@ class ActiveRunPageState extends State<ActiveRunPage> {
   }
 
   Future<void> _initializeRun() async {
-    // Check for location permissions before proceeding.
+    // Check for location permissions before subscribing.
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
       permission = await Geolocator.requestPermission();
       if (permission != LocationPermission.whileInUse &&
           permission != LocationPermission.always) {
-        // If permission is still not granted, show a message and return.
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Location permission not granted. Please allow location access to start run.'),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'Location permission not granted. Please allow location access to start run.')),
+          );
+        }
         return;
       }
     }
 
     // Get the initial location.
     final initialPosition = await locationService.getCurrentLocation();
-    if (initialPosition != null) {
+    if (initialPosition != null && mounted) {
       setState(() {
         _currentLocation = initialPosition;
       });
@@ -111,12 +111,15 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     // Subscribe to the location stream with error handling.
     _locationSubscription = locationService.trackLocation().listen(
           (newPosition) {
-        if (mounted) {
-          setState(() => _currentLocation = newPosition);
-          if (_isInitializing && newPosition.accuracy < 25) {
-            _isInitializing = false;
-            _startRun(newPosition);
+        if (!mounted) return;
+        setState(() => _currentLocation = newPosition);
+        if (_isInitializing && newPosition.accuracy < 25) {
+          if (mounted) {
+            setState(() {
+              _isInitializing = false;
+            });
           }
+          _startRun(newPosition);
         }
       },
       onError: (error) async {
@@ -125,14 +128,18 @@ class ActiveRunPageState extends State<ActiveRunPage> {
         LocationPermission newPermission = await Geolocator.checkPermission();
         if (newPermission == LocationPermission.denied ||
             newPermission == LocationPermission.deniedForever) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Location permission is required to start a run.')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('Location permission is required to start a run.')),
+            );
+          }
         } else {
-          // If permission is now granted, cancel the old subscription and reinitialize.
-          _locationSubscription?.cancel();
-          _initializeRun();
+          // Permission is granted now – cancel the current subscription and reinitialize.
+          await _locationSubscription?.cancel();
+          if (mounted) {
+            _initializeRun();
+          }
         }
       },
     );
@@ -140,7 +147,11 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     // Fallback: If after 30 seconds we are still initializing, start with the last known location.
     Timer(const Duration(seconds: 30), () {
       if (_isInitializing && mounted && _currentLocation != null) {
-        _isInitializing = false;
+        if (mounted) {
+          setState(() {
+            _isInitializing = false;
+          });
+        }
         _startRun(_currentLocation!);
       }
     });
@@ -148,6 +159,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
 
   @protected
   void _startRun(Position position) {
+    if (!mounted) return;
     setState(() {
       _startLocation = position;
       _isTracking = true;
@@ -163,16 +175,17 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     });
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_autoPaused && mounted) {
+      if (!mounted) return;
+      if (!_autoPaused) {
         setState(() => _secondsElapsed++);
       }
     });
 
     // Start listening to location updates for the run.
     locationService.trackLocation().listen((newPosition) {
-      if (!_isTracking) return;
+      if (!_isTracking || !mounted) return;
 
-      final speed = (newPosition.speed).clamp(0.0, double.infinity);
+      final speed = newPosition.speed.clamp(0.0, double.infinity);
       _handleAutoPauseLogic(speed);
 
       if (_lastRecordedLocation != null && !_autoPaused) {
@@ -183,7 +196,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
           newPosition.longitude,
         );
 
-        if (distance > 20.0) {
+        if (distance > 20.0 && mounted) {
           setState(() {
             _distanceCovered += distance;
             _lastRecordedLocation = LatLng(newPosition.latitude, newPosition.longitude);
@@ -191,24 +204,26 @@ class ActiveRunPageState extends State<ActiveRunPage> {
         }
       }
 
-      setState(() {
-        _currentLocation = newPosition;
-        final newPoint = LatLng(newPosition.latitude, newPosition.longitude);
-        _route.add(newPoint);
-        _routePolyline = _routePolyline.copyWith(pointsParam: _route);
-      });
+      if (mounted) {
+        setState(() {
+          _currentLocation = newPosition;
+          final newPoint = LatLng(newPosition.latitude, newPosition.longitude);
+          _route.add(newPoint);
+          _routePolyline = _routePolyline.copyWith(pointsParam: _route);
+        });
 
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLng(
-          LatLng(newPosition.latitude, newPosition.longitude),
-        ),
-      );
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLng(
+            LatLng(newPosition.latitude, newPosition.longitude),
+          ),
+        );
+      }
     });
   }
 
   void _handleAutoPauseLogic(double speed) {
     if (_autoPaused) {
-      if (speed > _resumeThreshold) {
+      if (speed > _resumeThreshold && mounted) {
         setState(() {
           _autoPaused = false;
           _stillCounter = 0;
@@ -217,7 +232,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     } else {
       if (speed < _pauseThreshold) {
         _stillCounter++;
-        if (_stillCounter >= 5) {
+        if (_stillCounter >= 5 && mounted) {
           setState(() => _autoPaused = true);
         }
       } else {
@@ -243,17 +258,21 @@ class ActiveRunPageState extends State<ActiveRunPage> {
   @protected
   void endRun() {
     if (_currentLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot end run without valid location')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cannot end run without valid location')),
+        );
+      }
       return;
     }
 
     _timer?.cancel();
-    setState(() {
-      _endLocation = _currentLocation;
-      _isTracking = false;
-    });
+    if (mounted) {
+      setState(() {
+        _endLocation = _currentLocation;
+        _isTracking = false;
+      });
+    }
     _saveRunData();
   }
 
@@ -271,12 +290,10 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       }
 
       final distance = double.parse(_distanceCovered.toStringAsFixed(2));
-      final startTime = (_startLocation!.timestamp ?? DateTime.now())
-          .toUtc()
-          .toIso8601String();
-      final endTime = (_endLocation!.timestamp ?? DateTime.now())
-          .toUtc()
-          .toIso8601String();
+      final startTime =
+      (_startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
+      final endTime =
+      (_endLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
 
       final routeJson = _route.map((point) => {
         'latitude': point.latitude,
@@ -310,7 +327,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
         final responseData = jsonDecode(response.body);
         final data = responseData['data'];
 
-        if (data != null) {
+        if (data != null && mounted) {
           bool hasChallenge = false;
 
           if (data['total_distance_km'] != null &&
@@ -409,6 +426,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
   void dispose() {
     _timer?.cancel();
     _locationSubscription?.cancel();
+    _mapController?.dispose();
     super.dispose();
   }
 
@@ -434,7 +452,9 @@ class ActiveRunPageState extends State<ActiveRunPage> {
             myLocationEnabled: true,
             myLocationButtonEnabled: true,
             polylines: {_routePolyline},
-            onMapCreated: (controller) => _mapController = controller,
+            onMapCreated: (controller) {
+              _mapController = controller;
+            },
           ),
           _buildMetricsCard(distanceKm),
           if (_autoPaused) _buildAutoPausedCard(),
