@@ -15,10 +15,10 @@ import 'package:year4_project/pages/challenges_page.dart';
 import 'package:year4_project/pages/active_run_page.dart';
 import 'package:year4_project/pages/duo_active_run_page.dart';
 import 'package:year4_project/pages/league_room_page.dart';
-import 'package:year4_project/pages/history_page.dart';
 import 'package:year4_project/pages/journey_type_page.dart';
 import 'package:year4_project/pages/duo_waiting_room_page.dart';
 import 'package:year4_project/services/team_service.dart';
+import 'package:year4_project/pages/history_page.dart';
 
 Future<void> initSupabase() async {
   await Supabase.initialize(
