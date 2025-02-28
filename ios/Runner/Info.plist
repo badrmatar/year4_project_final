@@ -8,6 +8,8 @@
     <!-- If you require background location tracking, uncomment the key below -->
     <key>NSLocationAlwaysUsageDescription</key>
     <string>This app uses your location to track your run even when the app is in the background.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>This app requires access to your location at all times to track your run accurately, even in the background.</string>
 
     <!-- Google Maps API Key -->
     <key>GMSApiKey</key>
