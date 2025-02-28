@@ -11,6 +11,9 @@
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>This app requires access to your location at all times to track your run accurately, even in the background.</string>
 
+    <key>NSUserNotificationUsageDescription</key>
+    <string>Receive updates about your running progress and achievements.</string>
+
     <!-- Google Maps API Key -->
     <key>GMSApiKey</key>
     <string>AIzaSyBffijFTKZIwz_Psp8FpXeXhyWj23G7VWo</string>
