@@ -1,15 +1,13 @@
 workflows:
   ios-workflow:
-    name: iOS Workflow
-    max_build_duration: 120
+    name: iOS Production Workflow
     environment:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.example.year4Project
-      vars:
-        FL_INCREMENTOR: 1
       xcode: latest
       cocoapods: default
+      flutter: stable
     triggering:
       events:
         - push
@@ -26,9 +24,9 @@ workflows:
           flutter pub get
           flutter pub upgrade
 
-      - name: Increment build number
+      - name: Prepare build
         script: |
-          # Generate a unique build number
+          # Dynamically generate build number
           BUILD_NUMBER=$(($(date +%y%m%d%H%M) + 100))
           sed -i '' "s/version: .*+[0-9]*/version: 1.0.1+$BUILD_NUMBER/" pubspec.yaml
 
@@ -42,8 +40,7 @@ workflows:
             -scheme Runner \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath build/Runner.xcarchive \
-            CODE_SIGNING_ALLOWED=NO
+            -archivePath build/Runner.xcarchive
 
       - name: Create IPA
         script: |
@@ -54,23 +51,24 @@ workflows:
 
     artifacts:
       - build/ios/ipa/*.ipa
-      - build/Runner.xcarchive
+      - flutter_drive.log
 
     publishing:
+      email:
+        recipients:
+          - your_email@example.com
       app_store_connect:
-        api_key: $APP_STORE_CONNECT_API_KEY    # Set this in Codemagic environment variables
-        key_id: $APP_STORE_CONNECT_KEY_ID      # Set this in Codemagic environment variables
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID # Set this in Codemagic environment variables
+        app_name: DuoRun
         submit_to_testflight: true
-        beta_groups:                           # Optional: specify TestFlight groups
-          - "External Testers"
+        beta_groups:
+          - External Testers
 
   android-workflow:
-    name: Android Workflow
-    max_build_duration: 120
+    name: Android Production Workflow
     environment:
       android_signing:
         - keystore_reference
+      flutter: stable
     triggering:
       events:
         - push
