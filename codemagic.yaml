@@ -4,7 +4,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.example.year4Project
+        bundle_identifier: com.badrm.duorun
       xcode: latest
       cocoapods: default
       flutter: stable
