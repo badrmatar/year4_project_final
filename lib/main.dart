@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
@@ -32,33 +34,42 @@ Future<void> requestLocationPermission() async {
     // First check if location services are enabled
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      // Location services are not enabled, we can't request permission
+      // Location services are not enabled, show dialog to the user
       print('Location services disabled. Cannot request permission.');
       return;
     }
 
-    // Check for location permission
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      // Request permission
-      permission = await Geolocator.requestPermission();
+    // Special handling for iOS
+    if (Platform.isIOS) {
+      // For iOS, we need to be more explicit about the permission request
+      LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        // Permissions are denied, we can't proceed with location features
-        print('Location permissions denied');
+        // Request location permission with more explicit messaging
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          print('Location permissions denied on iOS');
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        // Show a dialog directing user to settings
+        print('Location permissions permanently denied on iOS, guide user to settings');
         return;
+      }
+    } else {
+      // Original Android code path
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          print('Location permissions denied');
+          return;
+        }
       }
     }
 
-    if (permission == LocationPermission.deniedForever) {
-      // Permissions are permanently denied, guide user to settings
-      print('Location permissions permanently denied, cannot request permission');
-      return;
-    }
-
-    // At this point, permissions are granted
-    print('Location permissions granted: $permission');
-
-    // Test location access to ensure permissions work correctly
+    // Test location access with a shorter timeout for iOS
     try {
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,

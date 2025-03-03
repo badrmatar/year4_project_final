@@ -23,41 +23,53 @@ class LocationService {
 
   Future<Position?> getCurrentLocation() async {
     try {
-      // Use platform-specific settings if needed
-      var locationSettings = const LocationSettings(
-        accuracy: LocationAccuracy.high,
-      );
-
-      // iOS-specific settings to handle background tracking
-      if (Platform.isIOS) {
-        locationSettings = AppleSettings(
-          accuracy: LocationAccuracy.high,
-          activityType: ActivityType.fitness,
-          showBackgroundLocationIndicator: true,
-        );
+      // Make sure location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return null; // Location services not enabled
       }
 
-      return await Geolocator.getCurrentPosition(
-        locationSettings: locationSettings,
-      );
+      // Check permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null; // Permissions not granted
+      }
+
+      // iOS-specific settings
+      if (Platform.isIOS) {
+        return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: const Duration(seconds: 10),
+        );
+      } else {
+        // Android path
+        return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 5),
+        );
+      }
     } catch (e) {
+      print('Error getting location: $e');
       return null;
     }
   }
 
-  // Continuous location tracking stream.
+// Modify the tracking method too
   Stream<Position> trackLocation() {
     var locationSettings = const LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 15,
+      distanceFilter: 5, // Update more frequently on iOS
     );
 
     // iOS-specific settings
     if (Platform.isIOS) {
       locationSettings = AppleSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 15,
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 5,
         activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+        allowBackgroundLocationUpdates: true,
         showBackgroundLocationIndicator: true,
       );
     }
