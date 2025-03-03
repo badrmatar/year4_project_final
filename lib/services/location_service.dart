@@ -21,32 +21,51 @@ class LocationService {
     }
   }
 
+  // lib/services/location_service.dart (partial update)
   Future<Position?> getCurrentLocation() async {
     try {
-      // Make sure location services are enabled
+      // First check if location service is enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        return null; // Location services not enabled
+        print('Location services are disabled');
+        return null;
       }
 
-      // Check permissions
+      // On iOS, we need to handle authorization status more carefully
       LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        return null; // Permissions not granted
+      print('Current location permission status: $permission');
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        print('After request, permission status: $permission');
+
+        if (permission == LocationPermission.denied) {
+          print('Location permission denied');
+          return null;
+        }
       }
 
-      // iOS-specific settings
+      if (permission == LocationPermission.deniedForever) {
+        print('Location permissions permanently denied');
+        return null;
+      }
+
+      // When targeting iOS, use a longer timeout for initial position acquisition
       if (Platform.isIOS) {
-        return await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.bestForNavigation,
-          timeLimit: const Duration(seconds: 10),
-        );
+        try {
+          return await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.best,
+            timeLimit: const Duration(seconds: 15),
+          );
+        } catch (timeoutError) {
+          print('Timeout getting precise location, falling back to last known position');
+          // Fall back to last known position if getCurrentPosition times out
+          return await Geolocator.getLastKnownPosition();
+        }
       } else {
         // Android path
         return await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 5),
         );
       }
     } catch (e) {

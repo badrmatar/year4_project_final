@@ -31,6 +31,7 @@ class ActiveRunPage extends StatefulWidget {
 class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   bool _isInitializing = true; // Track initialization state
   int _locationAttempts = 0; // Count location acquisition attempts
+  String _debugStatus = "Starting location services...";
 
   @override
   void initState() {
@@ -42,22 +43,73 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   Future<void> _initializeLocationTracking() async {
     setState(() {
       _isInitializing = true;
+      _debugStatus = "Checking location services...";
     });
 
-    // Request an initial location with platform-specific handling
+    // For iOS, we should check permission status explicitly first
+    if (Platform.isIOS) {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      setState(() => _debugStatus = "Location services enabled: $serviceEnabled");
+
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location services are disabled. Please enable them in Settings.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+          setState(() => _isInitializing = false);
+        }
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      setState(() => _debugStatus = "Initial permission status: $permission");
+
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        // Request permission and check again
+        setState(() => _debugStatus = "Requesting permission...");
+        permission = await Geolocator.requestPermission();
+        setState(() => _debugStatus = "After request, permission status: $permission");
+
+        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Location permission was denied. Please enable it in Settings.'),
+                duration: Duration(seconds: 4),
+              ),
+            );
+            setState(() => _isInitializing = false);
+          }
+          return;
+        }
+      }
+
+      // On iOS, there's sometimes a delay after granting permissions
+      // so we'll add a small delay before trying to get position
+      setState(() => _debugStatus = "Permission granted, waiting for systems to initialize...");
+      await Future.delayed(const Duration(milliseconds: 1000));
+    }
+
+    // Try to get current location
     try {
+      setState(() => _debugStatus = "Getting current location...");
       final position = await locationService.getCurrentLocation();
+
       if (position != null && mounted) {
         setState(() {
           currentLocation = position;
+          _debugStatus = "Got location with accuracy: ${position.accuracy}m";
         });
 
         // Platform specific accuracy requirements
         if (Platform.isIOS) {
-          if (position.accuracy < 50) {
-            // For iOS, be more lenient with initial accuracy
+          if (position.accuracy < 100) { // More lenient for iOS
             _startRunWithPosition(position);
           } else {
+            setState(() => _debugStatus = "Location not accurate enough, waiting for better signal...");
             _waitForBetterAccuracyIOS();
           }
         } else {
@@ -65,29 +117,49 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
           if (position.accuracy < 30) {
             _startRunWithPosition(position);
           } else {
+            setState(() => _debugStatus = "Location not accurate enough, waiting for better signal...");
             _waitForBetterAccuracy();
           }
         }
       } else {
+        setState(() => _debugStatus = "Couldn't get initial position, trying fallback...");
+
+        // If we still couldn't get position, try one more time with getLastKnownPosition
+        if (Platform.isIOS) {
+          final lastPosition = await Geolocator.getLastKnownPosition();
+          if (lastPosition != null && mounted) {
+            setState(() {
+              currentLocation = lastPosition;
+              _debugStatus = "Using last known position with timestamp: ${lastPosition.timestamp}";
+            });
+            _startRunWithPosition(lastPosition);
+            return;
+          }
+        }
+
         // Handle case where we couldn't get a position
         if (mounted) {
+          setState(() => _debugStatus = "Failed to get location.");
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Unable to get your location. Please check app permissions.'),
+              content: Text('Unable to get your location. Try restarting the app.'),
               duration: Duration(seconds: 4),
             ),
           );
+          setState(() => _isInitializing = false);
         }
       }
     } catch (e) {
       print('Error initializing location: $e');
       if (mounted) {
+        setState(() => _debugStatus = "Location error: $e");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Location error: ${e.toString()}'),
             duration: const Duration(seconds: 4),
           ),
         );
+        setState(() => _isInitializing = false);
       }
     }
   }
@@ -97,6 +169,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     if (mounted) {
       setState(() {
         _isInitializing = false;
+        _debugStatus = "Starting run!";
       });
       startRun(position);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -117,10 +190,13 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       }
 
       _locationAttempts++;
+      setState(() => _debugStatus = "Waiting for better accuracy... Attempt $_locationAttempts");
+
       final newPosition = await locationService.getCurrentLocation();
       if (newPosition != null && mounted) {
         setState(() {
           currentLocation = newPosition;
+          _debugStatus = "New accuracy: ${newPosition.accuracy}m";
         });
 
         // Start the run once we have good accuracy or made several attempts
@@ -138,6 +214,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         } else {
           setState(() {
             _isInitializing = false;
+            _debugStatus = "Timeout waiting for accurate location.";
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -159,14 +236,17 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       }
 
       _locationAttempts++;
+      setState(() => _debugStatus = "iOS: Waiting for better accuracy... Attempt $_locationAttempts");
+
       final newPosition = await locationService.getCurrentLocation();
       if (newPosition != null && mounted) {
         setState(() {
           currentLocation = newPosition;
+          _debugStatus = "iOS: New accuracy: ${newPosition.accuracy}m";
         });
 
-        // On iOS we might need to be more lenient with accuracy
-        if (newPosition.accuracy < 50 || _locationAttempts > 7) {
+        // On iOS we need to be more lenient with accuracy
+        if (newPosition.accuracy < 100 || _locationAttempts > 7) {
           timer.cancel();
           _startRunWithPosition(newPosition);
         }
@@ -180,6 +260,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         } else {
           setState(() {
             _isInitializing = false;
+            _debugStatus = "iOS: Timeout waiting for location.";
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -295,19 +376,71 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                 CircularProgressIndicator(
                   color: currentLocation != null ? Colors.green : Colors.white,
                 ),
+                const SizedBox(height: 16),
+                // Debug status
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _debugStatus,
+                    style: const TextStyle(color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 12),
                 if (currentLocation != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 16.0),
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'Location: ${currentLocation!.latitude.toStringAsFixed(6)}, ${currentLocation!.longitude.toStringAsFixed(6)}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                if (currentLocation != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
                     child: Text(
                       'Accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)} meters',
                       style: const TextStyle(color: Colors.white),
                     ),
                   ),
                 const SizedBox(height: 10),
+                FutureBuilder<LocationPermission>(
+                  future: Geolocator.checkPermission(),
+                  builder: (context, snapshot) {
+                    return Text(
+                      'Permission status: ${snapshot.data?.toString() ?? "checking..."}',
+                      style: const TextStyle(color: Colors.white70),
+                    );
+                  },
+                ),
                 Text(
                   'Attempt ${_locationAttempts + 1}',
                   style: const TextStyle(color: Colors.white70),
                 ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: () {
+                    _locationAttempts = 0;
+                    _initializeLocationTracking(); // Re-try
+                  },
+                  child: const Text('Retry Location'),
+                ),
+                if (Platform.isIOS && currentLocation != null)
+                  ElevatedButton(
+                    onPressed: () {
+                      // Force start with current location even if not ideal
+                      _startRunWithPosition(currentLocation!);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                    ),
+                    child: const Text('Force Start with Current Location'),
+                  ),
               ],
             ),
           ),
@@ -330,7 +463,19 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             myLocationEnabled: true,
             myLocationButtonEnabled: true,
             polylines: {routePolyline},
-            onMapCreated: (controller) => mapController = controller,
+            onMapCreated: (controller) {
+              mapController = controller;
+
+              // For iOS, immediately move camera to current location
+              if (Platform.isIOS && currentLocation != null) {
+                controller.animateCamera(
+                  CameraUpdate.newLatLngZoom(
+                    LatLng(currentLocation!.latitude, currentLocation!.longitude),
+                    15,
+                  ),
+                );
+              }
+            },
           ),
           // Use the reusable RunMetricsCard widget.
           Positioned(

@@ -4,11 +4,11 @@
 <dict>
     <!-- Location Permissions - Properly formatted -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>This app needs access to your location to track your run.</string>
+    <string>This app requires access to your location to track your run and display it on the map.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>This app uses your location to track your run even when the app is in the background.</string>
+    <string>This app requires access to your location in the background to continue tracking your run even when the app is not on screen.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>This app requires access to your location at all times to track your run accurately, even in the background.</string>
+    <string>This app requires access to your location at all times to accurately track your running route and display it on the map, even when the app is in the background.</string>
 
     <!-- Background Modes - Needed for location tracking in background -->
     <key>UIBackgroundModes</key>
