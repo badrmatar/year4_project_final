@@ -1,4 +1,4 @@
-// lib/pages/active_run_page.dart
+// lib/pages/active_run_page.dart (partial update)
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io'; // Added for Platform checks
@@ -32,6 +32,12 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   bool _isInitializing = true; // Track initialization state
   int _locationAttempts = 0; // Count location acquisition attempts
   String _debugStatus = "Starting location services...";
+  List<Position> _positionSamples = []; // Track multiple position samples
+  Timer? _locationSamplingTimer; // Timer for sampling locations
+
+  // Accuracy thresholds tailored for each platform
+  final double _goodAccuracyThreshold = Platform.isIOS ? 65.0 : 20.0;
+  final double _acceptableAccuracyThreshold = Platform.isIOS ? 100.0 : 40.0;
 
   @override
   void initState() {
@@ -39,23 +45,75 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     _initializeLocationTracking();
   }
 
-  /// Initialize location tracking with platform-specific handling
+  /// Helper to determine if accuracy is valid (not the suspicious 1440 value)
+  bool _isValidAccuracy(double accuracy) {
+    // Filter out the suspicious 1440m value
+    if (accuracy == 1440.0) return false;
+
+    // Also filter out other abnormally high values
+    if (accuracy > 500.0) return false;
+
+    return true;
+  }
+
+  /// Helper to find the position with best accuracy from a list
+  Position _getBestPosition(List<Position> positions) {
+    if (positions.isEmpty) throw Exception("No positions to choose from");
+
+    // Filter out suspicious accuracy values
+    final validPositions = positions.where((pos) => _isValidAccuracy(pos.accuracy)).toList();
+
+    if (validPositions.isEmpty) {
+      // If all had suspicious values, use all positions instead
+      positions.sort((a, b) => a.accuracy.compareTo(b.accuracy));
+      return positions.first;
+    }
+
+    // Sort by accuracy (lower is better)
+    validPositions.sort((a, b) => a.accuracy.compareTo(b.accuracy));
+    return validPositions.first;
+  }
+
+  /// Initialize location tracking with improved accuracy handling
   Future<void> _initializeLocationTracking() async {
     setState(() {
       _isInitializing = true;
       _debugStatus = "Checking location services...";
+      _positionSamples = [];
     });
 
-    // For iOS, we should check permission status explicitly first
-    if (Platform.isIOS) {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      setState(() => _debugStatus = "Location services enabled: $serviceEnabled");
+    // Check if location services are enabled
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    setState(() => _debugStatus = "Location services enabled: $serviceEnabled");
 
-      if (!serviceEnabled) {
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location services are disabled. Please enable them in Settings.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        setState(() => _isInitializing = false);
+      }
+      return;
+    }
+
+    // Check permission status
+    LocationPermission permission = await Geolocator.checkPermission();
+    setState(() => _debugStatus = "Initial permission status: $permission");
+
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      // Request permission and check again
+      setState(() => _debugStatus = "Requesting permission...");
+      permission = await Geolocator.requestPermission();
+      setState(() => _debugStatus = "After request, permission status: $permission");
+
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Location services are disabled. Please enable them in Settings.'),
+              content: Text('Location permission was denied. Please enable it in Settings.'),
               duration: Duration(seconds: 4),
             ),
           );
@@ -63,103 +121,186 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         }
         return;
       }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      setState(() => _debugStatus = "Initial permission status: $permission");
-
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        // Request permission and check again
-        setState(() => _debugStatus = "Requesting permission...");
-        permission = await Geolocator.requestPermission();
-        setState(() => _debugStatus = "After request, permission status: $permission");
-
-        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Location permission was denied. Please enable it in Settings.'),
-                duration: Duration(seconds: 4),
-              ),
-            );
-            setState(() => _isInitializing = false);
-          }
-          return;
-        }
-      }
-
-      // On iOS, there's sometimes a delay after granting permissions
-      // so we'll add a small delay before trying to get position
-      setState(() => _debugStatus = "Permission granted, waiting for systems to initialize...");
-      await Future.delayed(const Duration(milliseconds: 1000));
     }
 
-    // Try to get current location
-    try {
-      setState(() => _debugStatus = "Getting current location...");
-      final position = await locationService.getCurrentLocation();
+    // Start collecting location samples
+    _startLocationSampling();
 
-      if (position != null && mounted) {
-        setState(() {
-          currentLocation = position;
-          _debugStatus = "Got location with accuracy: ${position.accuracy}m";
-        });
+    // Set a backup timeout
+    Timer(const Duration(seconds: 30), () {
+      if (_isInitializing && mounted) {
+        _locationSamplingTimer?.cancel();
+        _evaluateAndStartRun(true); // Force start with what we have
+      }
+    });
+  }
 
-        // Platform specific accuracy requirements
-        if (Platform.isIOS) {
-          if (position.accuracy < 100) { // More lenient for iOS
-            _startRunWithPosition(position);
-          } else {
-            setState(() => _debugStatus = "Location not accurate enough, waiting for better signal...");
-            _waitForBetterAccuracyIOS();
-          }
-        } else {
-          // Android path
-          if (position.accuracy < 30) {
-            _startRunWithPosition(position);
-          } else {
-            setState(() => _debugStatus = "Location not accurate enough, waiting for better signal...");
-            _waitForBetterAccuracy();
-          }
-        }
-      } else {
-        setState(() => _debugStatus = "Couldn't get initial position, trying fallback...");
+  /// Start continuous sampling of location to find good accuracy
+  void _startLocationSampling() {
+    _locationSamplingTimer?.cancel();
 
-        // If we still couldn't get position, try one more time with getLastKnownPosition
-        if (Platform.isIOS) {
-          final lastPosition = await Geolocator.getLastKnownPosition();
-          if (lastPosition != null && mounted) {
-            setState(() {
-              currentLocation = lastPosition;
-              _debugStatus = "Using last known position with timestamp: ${lastPosition.timestamp}";
-            });
-            _startRunWithPosition(lastPosition);
+    // Create proper location settings by platform
+    final LocationSettings locationSettings = Platform.isIOS
+        ? AppleSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+      activityType: ActivityType.fitness,
+      pauseLocationUpdatesAutomatically: false,
+    )
+        : AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 0,
+    );
+
+    setState(() => _debugStatus = "Collecting location samples...");
+
+    // Declare the subscription variable
+    StreamSubscription<Position>? subscription;
+
+    // Set a timer to cancel this subscription after max attempts
+    _locationSamplingTimer = Timer(const Duration(seconds: 15), () {
+      subscription?.cancel();
+      if (mounted && _isInitializing) {
+        _evaluateAndStartRun(false);
+      }
+    });
+
+    // Subscribe to location stream to collect samples
+    subscription = Geolocator.getPositionStream(
+        locationSettings: locationSettings
+    ).listen(
+            (position) {
+          if (!mounted) {
+            subscription?.cancel();
             return;
           }
-        }
 
-        // Handle case where we couldn't get a position
-        if (mounted) {
-          setState(() => _debugStatus = "Failed to get location.");
+          _locationAttempts++;
+          setState(() {
+            currentLocation = position;
+            _debugStatus = "Sample #$_locationAttempts: ${position.accuracy.toStringAsFixed(1)}m";
+          });
+
+          // Only add valid readings to our samples
+          if (_isValidAccuracy(position.accuracy)) {
+            _positionSamples.add(position);
+          }
+
+          // If we got a good accuracy reading, we can start
+          if (position.accuracy <= _goodAccuracyThreshold) {
+            subscription?.cancel();
+            _evaluateAndStartRun(false);
+            return;
+          }
+
+          // After collecting multiple samples, evaluate if we have enough
+          if (_positionSamples.length >= 5 || _locationAttempts >= 10) {
+            subscription?.cancel();
+            _evaluateAndStartRun(false);
+            return;
+          }
+        },
+        onError: (error) {
+          setState(() => _debugStatus = "Location error: $error");
+          // Don't cancel on error, keep trying
+        }
+    );
+  }
+
+  /// Evaluate collected samples and start run if possible
+  void _evaluateAndStartRun(bool forceStart) {
+    if (!mounted || !_isInitializing) return;
+
+    if (_positionSamples.isEmpty && currentLocation == null) {
+      // No positions collected - try using direct getCurrentPosition
+      setState(() => _debugStatus = "No samples collected, trying direct method...");
+      _tryDirectLocationAcquisition();
+      return;
+    }
+
+    // If we have valid samples, find the best one
+    if (_positionSamples.isNotEmpty) {
+      Position bestPosition = _getBestPosition(_positionSamples);
+      setState(() => _debugStatus = "Best accuracy: ${bestPosition.accuracy.toStringAsFixed(1)}m");
+
+      // Start if accuracy is good enough or we've been forced to start
+      if (bestPosition.accuracy <= _acceptableAccuracyThreshold || forceStart) {
+        _startRunWithPosition(bestPosition);
+        return;
+      }
+    }
+
+    // If we have currentLocation but not good samples
+    if (currentLocation != null && (forceStart || _positionSamples.isEmpty)) {
+      _startRunWithPosition(currentLocation!);
+      return;
+    }
+
+    // If we get here and forceStart is true, use whatever we have
+    if (forceStart && currentLocation != null) {
+      _startRunWithPosition(currentLocation!);
+      return;
+    }
+
+    // If we get here, we don't have good enough data
+    setState(() {
+      _isInitializing = false;
+      _debugStatus = "Could not get accurate location";
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not get accurate location. Try again outdoors with clear sky view.'),
+        duration: Duration(seconds: 4),
+      ),
+    );
+  }
+
+  /// Try to get location directly as a fallback
+  void _tryDirectLocationAcquisition() async {
+    try {
+      setState(() => _debugStatus = "Trying direct location acquisition...");
+
+      // Use a longer timeout and best accuracy
+      final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.best,
+          timeLimit: const Duration(seconds: 15)
+      );
+
+      if (mounted) {
+        setState(() {
+          currentLocation = position;
+          _debugStatus = "Direct method accuracy: ${position.accuracy.toStringAsFixed(1)}m";
+        });
+
+        // If accuracy is acceptable or it's our last resort
+        if (_isValidAccuracy(position.accuracy) || _locationAttempts > 15) {
+          _startRunWithPosition(position);
+        } else {
+          setState(() {
+            _isInitializing = false;
+            _debugStatus = "Could not get accurate location";
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Unable to get your location. Try restarting the app.'),
-              duration: Duration(seconds: 4),
+              content: Text('GPS accuracy is poor. Try again in an open area.'),
+              duration: Duration(seconds: 3),
             ),
           );
-          setState(() => _isInitializing = false);
         }
       }
     } catch (e) {
-      print('Error initializing location: $e');
       if (mounted) {
-        setState(() => _debugStatus = "Location error: $e");
+        setState(() {
+          _isInitializing = false;
+          _debugStatus = "Location error: $e";
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Location error: ${e.toString()}'),
+            content: Text('Error getting location: ${e.toString()}'),
             duration: const Duration(seconds: 4),
           ),
         );
-        setState(() => _isInitializing = false);
       }
     }
   }
@@ -179,98 +320,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         ),
       );
     }
-  }
-
-  /// Helper method to wait for better accuracy on Android
-  void _waitForBetterAccuracy() {
-    Timer.periodic(const Duration(seconds: 2), (timer) async {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      _locationAttempts++;
-      setState(() => _debugStatus = "Waiting for better accuracy... Attempt $_locationAttempts");
-
-      final newPosition = await locationService.getCurrentLocation();
-      if (newPosition != null && mounted) {
-        setState(() {
-          currentLocation = newPosition;
-          _debugStatus = "New accuracy: ${newPosition.accuracy}m";
-        });
-
-        // Start the run once we have good accuracy or made several attempts
-        if (newPosition.accuracy < 30 || _locationAttempts > 10) {
-          timer.cancel();
-          _startRunWithPosition(newPosition);
-        }
-      }
-
-      // Safety timeout - use whatever we have after 30 seconds
-      if (_locationAttempts > 15) {
-        timer.cancel();
-        if (mounted && currentLocation != null) {
-          _startRunWithPosition(currentLocation!);
-        } else {
-          setState(() {
-            _isInitializing = false;
-            _debugStatus = "Timeout waiting for accurate location.";
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not get accurate location after multiple attempts.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-      }
-    });
-  }
-
-  /// Special method for iOS with different accuracy requirements
-  void _waitForBetterAccuracyIOS() {
-    Timer.periodic(const Duration(seconds: 2), (timer) async {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      _locationAttempts++;
-      setState(() => _debugStatus = "iOS: Waiting for better accuracy... Attempt $_locationAttempts");
-
-      final newPosition = await locationService.getCurrentLocation();
-      if (newPosition != null && mounted) {
-        setState(() {
-          currentLocation = newPosition;
-          _debugStatus = "iOS: New accuracy: ${newPosition.accuracy}m";
-        });
-
-        // On iOS we need to be more lenient with accuracy
-        if (newPosition.accuracy < 100 || _locationAttempts > 7) {
-          timer.cancel();
-          _startRunWithPosition(newPosition);
-        }
-      }
-
-      // Safety timeout after fewer attempts for iOS
-      if (_locationAttempts > 10) {
-        timer.cancel();
-        if (currentLocation != null && mounted) {
-          _startRunWithPosition(currentLocation!);
-        } else {
-          setState(() {
-            _isInitializing = false;
-            _debugStatus = "iOS: Timeout waiting for location.";
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Location services seem unavailable. Please check permissions.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-      }
-    });
   }
 
   /// Called when the user taps the "End Run" button.
@@ -353,6 +402,12 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   }
 
   @override
+  void dispose() {
+    _locationSamplingTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Show loading screen during initialization
     if (_isInitializing) {
@@ -408,24 +463,19 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                       style: const TextStyle(color: Colors.white),
                     ),
                   ),
-                const SizedBox(height: 10),
-                FutureBuilder<LocationPermission>(
-                  future: Geolocator.checkPermission(),
-                  builder: (context, snapshot) {
-                    return Text(
-                      'Permission status: ${snapshot.data?.toString() ?? "checking..."}',
+                if (_positionSamples.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'Samples collected: ${_positionSamples.length}',
                       style: const TextStyle(color: Colors.white70),
-                    );
-                  },
-                ),
-                Text(
-                  'Attempt ${_locationAttempts + 1}',
-                  style: const TextStyle(color: Colors.white70),
-                ),
+                    ),
+                  ),
                 const SizedBox(height: 20),
                 ElevatedButton(
                   onPressed: () {
                     _locationAttempts = 0;
+                    _positionSamples.clear();
                     _initializeLocationTracking(); // Re-try
                   },
                   child: const Text('Retry Location'),
