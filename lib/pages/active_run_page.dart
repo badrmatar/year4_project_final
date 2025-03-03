@@ -33,23 +33,31 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   @override
   void initState() {
     super.initState();
-    // Request an initial location and then start the run.
-    locationService.getCurrentLocation().then((position) {
+
+    // Wait for better GPS accuracy before starting the timer
+    locationService.getCurrentLocation().then((position) async {
       if (position != null && mounted) {
         setState(() {
           currentLocation = position;
         });
-        // For example, start the run when the accuracy is good enough:
-        if (position.accuracy < 20) {
-          startRun(position);
-        }
-      }
-    });
 
-    // Fallback timer in case initialization takes too long.
-    Timer(const Duration(seconds: 30), () {
-      if (currentLocation != null && mounted && !isTracking) {
-        startRun(currentLocation!);
+        // Wait to get a second, more accurate reading before officially starting
+        await Future.delayed(const Duration(seconds: 3));
+        final updatedPosition = await locationService.getCurrentLocation();
+
+        if (updatedPosition != null && mounted) {
+          // Only start tracking with a reasonably accurate position
+          if (updatedPosition.accuracy < 50) {
+            startRun(updatedPosition);
+          } else {
+            // If accuracy is still poor, try once more
+            await Future.delayed(const Duration(seconds: 3));
+            final finalPosition = await locationService.getCurrentLocation();
+            if (finalPosition != null && mounted) {
+              startRun(finalPosition);
+            }
+          }
+        }
       }
     });
   }
