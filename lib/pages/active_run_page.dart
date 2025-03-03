@@ -123,20 +123,13 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       }
     }
 
-    // Start collecting location samples
-    _startLocationSampling();
-
-    // Set a backup timeout
-    Timer(const Duration(seconds: 30), () {
-      if (_isInitializing && mounted) {
-        _locationSamplingTimer?.cancel();
-        _evaluateAndStartRun(true); // Force start with what we have
-      }
-    });
+    // Start continuous location listening until we get an acceptable accuracy
+    _startLocationSamplingUntilGoodAccuracy();
   }
 
-  /// Start continuous sampling of location to find good accuracy
-  void _startLocationSampling() {
+  /// Start continuous sampling of location UNTIL good accuracy is found (no time limit)
+  void _startLocationSamplingUntilGoodAccuracy() {
+    // Cancel any existing timer
     _locationSamplingTimer?.cancel();
 
     // Create proper location settings by platform
@@ -152,20 +145,12 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       distanceFilter: 0,
     );
 
-    setState(() => _debugStatus = "Collecting location samples...");
+    setState(() => _debugStatus = "Waiting for GPS accuracy < 50m...");
 
     // Declare the subscription variable
     StreamSubscription<Position>? subscription;
 
-    // Set a timer to cancel this subscription after max attempts
-    _locationSamplingTimer = Timer(const Duration(seconds: 15), () {
-      subscription?.cancel();
-      if (mounted && _isInitializing) {
-        _evaluateAndStartRun(false);
-      }
-    });
-
-    // Subscribe to location stream to collect samples
+    // Subscribe to location stream without time limit - will keep listening until good accuracy
     subscription = Geolocator.getPositionStream(
         locationSettings: locationSettings
     ).listen(
@@ -186,23 +171,27 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             _positionSamples.add(position);
           }
 
-          // If we got a good accuracy reading, we can start
-          if (position.accuracy <= _goodAccuracyThreshold) {
+          // If we have a reading with accuracy below our threshold, start immediately
+          if (position.accuracy <= _acceptableAccuracyThreshold) {
             subscription?.cancel();
-            _evaluateAndStartRun(false);
+            _startRunWithPosition(position); // Start immediately with this good reading
             return;
           }
 
-          // After collecting multiple samples, evaluate if we have enough
-          if (_positionSamples.length >= 5 || _locationAttempts >= 10) {
-            subscription?.cancel();
-            _evaluateAndStartRun(false);
-            return;
+          // If we get a reading with exactly 1440m, show special debug message
+          if (position.accuracy == 1440.0) {
+            setState(() {
+              _debugStatus = "Received default accuracy value (1440m). Waiting for better signal...";
+            });
+          } else if (position.accuracy > _acceptableAccuracyThreshold) {
+            setState(() {
+              _debugStatus = "Accuracy: ${position.accuracy.toStringAsFixed(1)}m - waiting for < 50m";
+            });
           }
         },
         onError: (error) {
           setState(() => _debugStatus = "Location error: $error");
-          // Don't cancel on error, keep trying
+          // Don't cancel on error, keep trying endlessly
         }
     );
   }
@@ -486,24 +475,33 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                 if (currentLocation != null)
                   Column(
                     children: [
-                      if (currentLocation!.accuracy > _acceptableAccuracyThreshold)
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Text(
-                            'Warning: GPS accuracy is ${currentLocation!.accuracy.toStringAsFixed(1)}m\nMust be under 50m',
-                            style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
-                            textAlign: TextAlign.center,
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          'Current accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m\nWaiting for accuracy < 50m',
+                          style: TextStyle(
+                              color: currentLocation!.accuracy <= _acceptableAccuracyThreshold
+                                  ? Colors.green
+                                  : Colors.orange,
+                              fontWeight: FontWeight.bold
                           ),
+                          textAlign: TextAlign.center,
                         ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'No time limit - will start automatically\nwhen accuracy is below 50m',
+                        style: const TextStyle(color: Colors.white70),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
                       ElevatedButton(
-                        onPressed: currentLocation!.accuracy <= _acceptableAccuracyThreshold
-                            ? () => _startRunWithPosition(currentLocation!)
-                            : null, // Disable button if accuracy > 50m
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          disabledBackgroundColor: Colors.grey,
-                        ),
-                        child: const Text('Start When Accuracy < 50m'),
+                        onPressed: () {
+                          _locationAttempts = 0;
+                          _positionSamples.clear();
+                          _initializeLocationTracking(); // Re-try
+                        },
+                        child: const Text('Restart GPS Search'),
                       ),
                     ],
                   ),
