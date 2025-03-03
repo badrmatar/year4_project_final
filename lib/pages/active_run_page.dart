@@ -34,29 +34,74 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   void initState() {
     super.initState();
 
-    // Wait for better GPS accuracy before starting the timer
-    locationService.getCurrentLocation().then((position) async {
+    // Request an initial location but only start the run when accuracy is good
+    locationService.getCurrentLocation().then((position) {
       if (position != null && mounted) {
         setState(() {
           currentLocation = position;
         });
 
-        // Wait to get a second, more accurate reading before officially starting
-        await Future.delayed(const Duration(seconds: 3));
-        final updatedPosition = await locationService.getCurrentLocation();
+        // Only start the run if accuracy is below 30 meters
+        if (position.accuracy < 30) {
+          startRun(position);
+        } else {
+          // Show message that we're waiting for better GPS accuracy
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Waiting for better GPS accuracy...'),
+              duration: Duration(seconds: 3),
+            ),
+          );
 
-        if (updatedPosition != null && mounted) {
-          // Only start tracking with a reasonably accurate position
-          if (updatedPosition.accuracy < 50) {
-            startRun(updatedPosition);
-          } else {
-            // If accuracy is still poor, try once more
-            await Future.delayed(const Duration(seconds: 3));
-            final finalPosition = await locationService.getCurrentLocation();
-            if (finalPosition != null && mounted) {
-              startRun(finalPosition);
-            }
-          }
+          // Keep checking for better accuracy
+          _waitForBetterAccuracy();
+        }
+      }
+    });
+  }
+
+// Helper method to wait for better accuracy
+  void _waitForBetterAccuracy() {
+    Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      final newPosition = await locationService.getCurrentLocation();
+      if (newPosition != null && mounted) {
+        setState(() {
+          currentLocation = newPosition;
+        });
+
+        // Start the run once we have good accuracy
+        if (newPosition.accuracy < 30) {
+          timer.cancel();
+          startRun(newPosition);
+
+          // Inform the user
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('GPS signal acquired! Starting run...'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    });
+
+    // Add a timeout to avoid waiting forever
+    Future.delayed(const Duration(seconds: 45), () {
+      if (mounted && !isTracking) {
+        // If we haven't started after 45 seconds, use whatever accuracy we have
+        if (currentLocation != null) {
+          startRun(currentLocation!);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Starting run with current accuracy (${currentLocation!.accuracy.toStringAsFixed(1)}m)'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
         }
       }
     });
