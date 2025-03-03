@@ -22,48 +22,49 @@ class LocationService {
   }
 
   // lib/services/location_service.dart (partial update)
+  // In your LocationService class
   Future<Position?> getCurrentLocation() async {
     try {
-      // First check if location service is enabled
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        print('Location services are disabled');
-        return null;
-      }
-
-      // On iOS, we need to handle authorization status more carefully
-      LocationPermission permission = await Geolocator.checkPermission();
-      print('Current location permission status: $permission');
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        print('After request, permission status: $permission');
-
-        if (permission == LocationPermission.denied) {
-          print('Location permission denied');
-          return null;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        print('Location permissions permanently denied');
-        return null;
-      }
-
-      // When targeting iOS, use a longer timeout for initial position acquisition
+      // For iOS, use specific iOS settings to force high accuracy
       if (Platform.isIOS) {
+        final LocationSettings locationSettings = AppleSettings(
+          accuracy: LocationAccuracy.bestForNavigation, // Force highest accuracy
+          activityType: ActivityType.fitness,
+          distanceFilter: 5,
+          pauseLocationUpdatesAutomatically: false,
+          // Request these to improve accuracy
+          allowBackgroundLocationUpdates: true,
+          showBackgroundLocationIndicator: true,
+        );
+
+        // Use continuous position stream to force GPS activation
+        final positionStream = Geolocator.getPositionStream(
+          locationSettings: locationSettings,
+        ).timeout(
+          const Duration(seconds: 15),
+          onTimeout: (sink) => sink.close(),
+        );
+
+        // Take the first position with reasonable accuracy
         try {
-          return await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.best,
-            timeLimit: const Duration(seconds: 15),
-          );
-        } catch (timeoutError) {
-          print('Timeout getting precise location, falling back to last known position');
-          // Fall back to last known position if getCurrentPosition times out
-          return await Geolocator.getLastKnownPosition();
+          final positions = await positionStream.take(10).toList();
+
+          // Find the position with best accuracy
+          if (positions.isNotEmpty) {
+            positions.sort((a, b) => a.accuracy.compareTo(b.accuracy));
+            return positions.first; // Return most accurate position
+          }
+        } catch (e) {
+          print('Error in position stream: $e');
         }
+
+        // Fall back to direct position request
+        return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: const Duration(seconds: 20),
+        );
       } else {
-        // Android path
+        // Android path - unchanged
         return await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
         );
