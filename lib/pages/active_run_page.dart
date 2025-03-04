@@ -1,4 +1,4 @@
-// lib/pages/active_run_page.dart (Updated)
+// lib/pages/active_run_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -53,8 +53,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   bool _isValidAccuracy(double accuracy) {
     // Filter out the suspicious 1440m value that iOS often gives initially
     if (accuracy == 1440.0) return false;
-
-    // Filter out other common suspicious values
     if (Platform.isIOS) {
       if (accuracy == 65.0) return false;
       if (accuracy == 10.0 && _locationAttempts <= 2) return false;
@@ -90,7 +88,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     setState(() => _debugStatus = "Location services enabled: $serviceEnabled");
-
     if (!serviceEnabled) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -106,12 +103,10 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
     LocationPermission permission = await Geolocator.checkPermission();
     setState(() => _debugStatus = "Initial permission status: $permission");
-
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
       setState(() => _debugStatus = "Requesting permission...");
       permission = await Geolocator.requestPermission();
       setState(() => _debugStatus = "After request, permission status: $permission");
-
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -132,7 +127,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   void _startLocationSamplingUntilGoodAccuracy() {
     _locationSamplingTimer?.cancel();
     _locationSamplingSubscription?.cancel();
-
     setState(() => _debugStatus = "Setting up location tracking...");
 
     final LocationSettings locationSettings = Platform.isIOS
@@ -264,43 +258,51 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         desiredAccuracy: LocationAccuracy.bestForNavigation,
         timeLimit: const Duration(seconds: 10),
       );
-
-      // Use UTC for both times and check against a relaxed threshold.
+      // Convert both times to UTC for a proper comparison.
       final currentUtc = DateTime.now().toUtc();
       final positionTimeUtc = finalPosition.timestamp?.toUtc();
-      if (positionTimeUtc == null || currentUtc.difference(positionTimeUtc).inSeconds > _freshnessThresholdSeconds) {
-        setState(() => _debugStatus =
-        "Verified position is stale (${positionTimeUtc == null ? 'unknown' : currentUtc.difference(positionTimeUtc).inSeconds}s old).");
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Location reading is stale. Please wait for a fresh reading."),
-            duration: Duration(seconds: 5),
-          ),
-        );
-        _initializeLocationTracking();
-        return;
-      }
 
-      if (finalPosition.accuracy <= _acceptableAccuracyThreshold &&
-          _isValidAccuracy(finalPosition.accuracy)) {
-        position = finalPosition;
-        setState(() => _debugStatus = "Using verified position!");
+      // If the final reading is stale...
+      if (positionTimeUtc != null &&
+          currentUtc.difference(positionTimeUtc).inSeconds > _freshnessThresholdSeconds) {
+        // If accuracy is still acceptable, ignore staleness.
+        if (finalPosition.accuracy <= _acceptableAccuracyThreshold &&
+            _isValidAccuracy(finalPosition.accuracy)) {
+          position = finalPosition;
+          setState(() => _debugStatus = "Using verified position (ignoring staleness)!");
+        } else {
+          setState(() => _debugStatus =
+          "Verified position is stale (${currentUtc.difference(positionTimeUtc).inSeconds}s old) and inaccurate.");
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Location reading is stale. Please wait for a fresh reading."),
+              duration: Duration(seconds: 5),
+            ),
+          );
+          _initializeLocationTracking();
+          return;
+        }
       } else {
-        setState(() => _debugStatus =
-        "Verified position accuracy ${finalPosition.accuracy.toStringAsFixed(1)}m exceeds threshold.");
+        // If the reading is fresh then verify its accuracy.
+        if (finalPosition.accuracy <= _acceptableAccuracyThreshold &&
+            _isValidAccuracy(finalPosition.accuracy)) {
+          position = finalPosition;
+          setState(() => _debugStatus = "Using verified position!");
+        } else {
+          setState(() => _debugStatus =
+          "Verified position accuracy ${finalPosition.accuracy.toStringAsFixed(1)}m exceeds threshold.");
+        }
       }
     } catch (e) {
       setState(() => _debugStatus =
       "Using best available position (${position.accuracy.toStringAsFixed(1)}m) due to error: $e");
     }
 
-    if (position.accuracy > _acceptableAccuracyThreshold ||
-        (position.timestamp != null &&
-            DateTime.now().toUtc().difference(position.timestamp!.toUtc()).inSeconds > _freshnessThresholdSeconds)) {
+    if (position.accuracy > _acceptableAccuracyThreshold) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              'GPS reading is not fresh or accurate (accuracy: ${position.accuracy.toStringAsFixed(1)}m). Please try again in an open area.'),
+              'GPS reading is not accurate enough (accuracy: ${position.accuracy.toStringAsFixed(1)}m). Please try again in an open area.'),
           duration: const Duration(seconds: 5),
         ),
       );
@@ -342,7 +344,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       );
       return;
     }
-
     final distance = double.parse(distanceCovered.toStringAsFixed(2));
     final startTime = (startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
     final endTime = (endLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
@@ -372,7 +373,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         },
         body: jsonEncode(requestBody),
       );
-
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Run saved successfully!')),
