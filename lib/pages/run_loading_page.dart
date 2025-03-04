@@ -41,12 +41,28 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
     super.initState();
     _initializeLocationTracking();
 
-    // Timer to update elapsed time display
-    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    // Timer to update elapsed time display and request new GPS fixes
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (mounted) {
         setState(() {
           _elapsedSeconds++;
         });
+
+        // Actively request a fresh location fix every second
+        try {
+          final newPosition = await _locationService.refreshCurrentLocation();
+          if (mounted && newPosition != null) {
+            setState(() {
+              // Update best position if this one is better
+              if (_bestPosition == null || newPosition.accuracy < _bestPosition!.accuracy) {
+                _bestPosition = newPosition;
+                print('New improved position: accuracy ${newPosition.accuracy}m');
+              }
+            });
+          }
+        } catch (e) {
+          print('Error getting fresh location: $e');
+        }
 
         // Check if we should auto-start after AUTO_START_SECONDS
         if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition != null) {
@@ -322,62 +338,73 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                   ),
                 ),
               // Accuracy improvement indicator that shows if GPS is getting better
-              if (_locationService.lastPosition != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _locationService.lastPosition!.accuracy < _bestPosition!.accuracy
-                            ? Icons.trending_down : Icons.trending_up,
-                        color: _locationService.lastPosition!.accuracy < _bestPosition!.accuracy
-                            ? Colors.green : Colors.orange,
-                        size: 16,
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10.0),
+                child: Column(
+                  children: [
+                    Text(
+                      '${_elapsedSeconds < AUTO_START_SECONDS ? "Checking GPS signal..." :
+                      _bestPosition!.accuracy <= ACCEPTABLE_ACCURACY ?
+                      "Starting run with current accuracy..." :
+                      "Still trying to improve accuracy..."}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _locationService.lastPosition!.accuracy < _bestPosition!.accuracy
-                            ? 'Signal improving' : 'Signal degrading',
-                        style: TextStyle(
-                          color: _locationService.lastPosition!.accuracy < _bestPosition!.accuracy
-                              ? Colors.green : Colors.orange,
-                          fontSize: 12,
+                      textAlign: TextAlign.center,
+                    ),
+
+                    if (_elapsedSeconds < AUTO_START_SECONDS)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          'Auto-start in ${AUTO_START_SECONDS - _elapsedSeconds} seconds',
+                          style: const TextStyle(color: Colors.amber, fontSize: 14),
                         ),
                       ),
-                    ],
+
+                    if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition!.accuracy > ACCEPTABLE_ACCURACY)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          'Need ${(_bestPosition!.accuracy - ACCEPTABLE_ACCURACY).toStringAsFixed(1)}m better accuracy',
+                          style: const TextStyle(color: Colors.orange, fontSize: 14),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // Progress indicator showing continuous efforts to improve GPS
+              if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition!.accuracy > ACCEPTABLE_ACCURACY)
+                Container(
+                  width: 200,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 8.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[800],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: LinearProgressIndicator(
+                    value: _elapsedSeconds % 3 / 3, // Creates a cycling progress effect
+                    backgroundColor: Colors.transparent,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
                 ),
             ],
             const SizedBox(height: 48),
-            // Action buttons
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Cancel button
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Cancel'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[800],
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
+            // Only show cancel button
+            Center(
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Cancel'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey[800],
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
-                const SizedBox(width: 16),
-                // Start run button - enabled if we have good accuracy
-                ElevatedButton.icon(
-                  onPressed: _hasGoodSignal ? _startRun : null,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Start Run'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    disabledBackgroundColor: Colors.grey,
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),

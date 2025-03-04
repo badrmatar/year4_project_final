@@ -22,7 +22,7 @@ class LocationService {
   StreamSubscription<Position>? _positionSubscription;
   Position? _lastPosition;
   LocationQuality _currentQuality = LocationQuality.unusable;
-  TrackingMode _currentMode = TrackingMode.standard;
+  TrackingMode _currentMode = TrackingMode.high_accuracy; // Default to high accuracy
   bool _isTracking = false;
 
   // Accuracy thresholds in meters
@@ -37,66 +37,31 @@ class LocationService {
   // Kalman filter for smoother position updates (only used in high accuracy mode)
   KalmanFilter2D? _kalmanFilter;
 
+  // Auto-pause variables
+  int stillCounter = 0;
+  final double pauseThreshold = 0.5;
+  final double resumeThreshold = 1.0;
+
   // Platform-specific settings
   LocationSettings _getLocationSettings() {
+    // Use higher accuracy settings regardless of platform
+    // to ensure we get the best possible updates
     if (Platform.isIOS) {
-      // iOS-specific settings with appropriate activity type
-      switch (_currentMode) {
-        case TrackingMode.high_accuracy:
-          return AppleSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 5,
-            activityType: ActivityType.fitness,
-            pauseLocationUpdatesAutomatically: false,
-            allowBackgroundLocationUpdates: true,
-            showBackgroundLocationIndicator: true,
-          );
-        case TrackingMode.battery_saving:
-          return AppleSettings(
-            accuracy: LocationAccuracy.reduced, // Changed from 'balanced' to 'reduced'
-            distanceFilter: 15,
-            activityType: ActivityType.fitness,
-            pauseLocationUpdatesAutomatically: true,
-            allowBackgroundLocationUpdates: true,
-            showBackgroundLocationIndicator: true,
-          );
-        case TrackingMode.standard:
-        default:
-          return AppleSettings(
-            accuracy: LocationAccuracy.best,
-            distanceFilter: 10,
-            activityType: ActivityType.fitness,
-            pauseLocationUpdatesAutomatically: false,
-            allowBackgroundLocationUpdates: true,
-            showBackgroundLocationIndicator: true,
-          );
-      }
+      return AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 5,
+        activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+        allowBackgroundLocationUpdates: true,
+        showBackgroundLocationIndicator: true,
+      );
     } else {
-      // Android-specific settings
-      switch (_currentMode) {
-        case TrackingMode.high_accuracy:
-          return AndroidSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 5,
-            forceLocationManager: false,
-            intervalDuration: const Duration(seconds: 1),
-          );
-        case TrackingMode.battery_saving:
-          return AndroidSettings(
-            accuracy: LocationAccuracy.reduced, // Changed from 'balanced' to 'reduced'
-            distanceFilter: 15,
-            forceLocationManager: false,
-            intervalDuration: const Duration(seconds: 3),
-          );
-        case TrackingMode.standard:
-        default:
-          return AndroidSettings(
-            accuracy: LocationAccuracy.best,
-            distanceFilter: 10,
-            forceLocationManager: false,
-            intervalDuration: const Duration(seconds: 2),
-          );
-      }
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+        forceLocationManager: false,
+        intervalDuration: const Duration(seconds: 1),
+      );
     }
   }
 
@@ -163,15 +128,15 @@ class LocationService {
   void setTrackingMode(TrackingMode mode) {
     if (_currentMode != mode) {
       _currentMode = mode;
+      // If already tracking, restart with new mode
       if (_isTracking) {
-        // Restart tracking with new mode
         _stopTracking();
         _startTracking();
       }
     }
   }
 
-  // Apply Kalman filter to reduce position jitter (only in high accuracy mode)
+  // Apply Kalman filter to reduce position jitter
   Position _filterPosition(Position position) {
     if (_currentMode != TrackingMode.high_accuracy || _kalmanFilter == null) {
       return position;
@@ -203,27 +168,34 @@ class LocationService {
 
     final locationSettings = _getLocationSettings();
 
+    print('LocationService: Starting position tracking with ${_currentMode.toString()}');
+
     _positionSubscription = Geolocator.getPositionStream(
         locationSettings: locationSettings
     ).listen((Position position) {
-      // Assess location quality
+      // Process all positions, but let consumers decide quality threshold
       final quality = _assessLocationQuality(position);
 
-      // Only update position if quality is acceptable
-      if (quality != LocationQuality.unusable) {
-        // Apply filtering for smoother paths
-        final filteredPosition = _filterPosition(position);
-        _lastPosition = filteredPosition;
-        _locationController.add(filteredPosition);
-      }
+      // Apply filtering for smoother paths
+      final filteredPosition = _filterPosition(position);
+      _lastPosition = filteredPosition;
 
-      // Always update quality
+      // Broadcast to all listeners
+      _locationController.add(filteredPosition);
+
+      // Update quality if changed
       if (quality != _currentQuality) {
         _currentQuality = quality;
         _qualityController.add(quality);
         _statusController.add(getQualityDescription(quality));
+
+        print('LocationService: Quality changed to ${quality.toString()} with accuracy ${position.accuracy}m');
       }
-    });
+    },
+        onError: (error) {
+          print('LocationService error: $error');
+          _statusController.add('Location error: $error');
+        });
 
     _isTracking = true;
   }
@@ -233,14 +205,22 @@ class LocationService {
     _positionSubscription?.cancel();
     _positionSubscription = null;
     _isTracking = false;
+    print('LocationService: Stopped position tracking');
   }
 
   // Check permission and start monitoring GPS quality
   Future<void> startQualityMonitoring() async {
-    if (_isTracking) return;
+    if (_isTracking) {
+      print('LocationService: Already tracking, not restarting');
+      return;
+    }
 
-    await _checkAndRequestPermission();
-    _startTracking();
+    final hasPermission = await _checkAndRequestPermission();
+    if (hasPermission) {
+      _startTracking();
+    } else {
+      _statusController.add('Location permission denied');
+    }
   }
 
   // Stop quality monitoring
@@ -253,10 +233,12 @@ class LocationService {
     _kalmanFilter = KalmanFilter2D(
       initialX: position.latitude,
       initialY: position.longitude,
-      // Default values are fine for most cases, but could be tuned
-      processNoise: 1e-5,      // Lower for smoother but less responsive tracking
-      measurementNoise: 15.0,   // Based on typical GPS accuracy in meters
+      // Lower process noise for smoother tracking
+      processNoise: 1e-5,
+      // Set based on typical GPS accuracy
+      measurementNoise: 15.0,
     );
+    print('LocationService: Initialized Kalman filter with starting position');
   }
 
   // Check if location accuracy is good enough to start a run
@@ -266,58 +248,6 @@ class LocationService {
       return false;
     }
     return true;
-  }
-
-  // Wait for a good accuracy fix before starting a run
-  Future<bool> waitForGoodAccuracy({
-    required Duration timeout,
-    required Function(int, LocationQuality) onProgress
-  }) async {
-    if (!_isTracking) {
-      await startQualityMonitoring();
-    }
-
-    // If we already have good accuracy, return immediately
-    if (_currentQuality == LocationQuality.good ||
-        _currentQuality == LocationQuality.excellent) {
-      return true;
-    }
-
-    // Create a completer to wait for good accuracy
-    final completer = Completer<bool>();
-
-    // Set timeout
-    final timer = Timer(timeout, () {
-      if (!completer.isCompleted) {
-        completer.complete(false);
-      }
-    });
-
-    // Counter for progress updates
-    int secondsElapsed = 0;
-    final progressTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      secondsElapsed++;
-      onProgress(secondsElapsed, _currentQuality);
-    });
-
-    // Listen for quality updates
-    final subscription = _qualityController.stream.listen((quality) {
-      if (quality == LocationQuality.good || quality == LocationQuality.excellent) {
-        if (!completer.isCompleted) {
-          completer.complete(true);
-        }
-      }
-    });
-
-    // Wait for result
-    final result = await completer.future;
-
-    // Clean up
-    timer.cancel();
-    progressTimer.cancel();
-    subscription.cancel();
-
-    return result;
   }
 
   // Check and request location permission
@@ -351,17 +281,61 @@ class LocationService {
       final hasPermission = await _checkAndRequestPermission();
       if (!hasPermission) return null;
 
-      return await Geolocator.getCurrentPosition(
+      print('LocationService: Getting current location...');
+
+      // Request position with highest accuracy and a reasonable timeout
+      final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
         timeLimit: const Duration(seconds: 15),
       );
+
+      print('LocationService: Got position with accuracy ${position.accuracy}m');
+
+      // Update last position and quality
+      _lastPosition = position;
+      _currentQuality = _assessLocationQuality(position);
+
+      // Send an initial update to streams
+      _locationController.add(position);
+      _qualityController.add(_currentQuality);
+
+      return position;
     } catch (e) {
+      print('LocationService: Error getting current location: $e');
       _statusController.add('Error getting location: $e');
       return null;
     }
   }
 
-  // For compatibility with your original trackLocation() method
+  // Actively get a fresh GPS fix - used for frequent polling
+  Future<Position?> refreshCurrentLocation() async {
+    try {
+      // Request position with highest accuracy but shorter timeout
+      // to avoid blocking UI for too long
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.bestForNavigation,
+        timeLimit: const Duration(seconds: 5),
+      );
+
+      print('LocationService: Refreshed position with accuracy ${position.accuracy}m');
+
+      // Update last position and quality
+      _lastPosition = position;
+      _currentQuality = _assessLocationQuality(position);
+
+      // Send updates to streams
+      _locationController.add(position);
+      _qualityController.add(_currentQuality);
+
+      return position;
+    } catch (e) {
+      // Less intrusive error logging for refresh attempts
+      print('LocationService: Refresh location attempt: $e');
+      return null;
+    }
+  }
+
+  // For compatibility with original trackLocation() method
   Stream<Position> trackLocation() {
     if (!_isTracking) {
       startQualityMonitoring();
@@ -375,5 +349,6 @@ class LocationService {
     _locationController.close();
     _qualityController.close();
     _statusController.close();
+    print('LocationService: Disposed');
   }
 }
