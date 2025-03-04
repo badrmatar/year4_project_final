@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:year4_project/services/auth_service.dart';
 
@@ -14,7 +13,7 @@ import 'package:year4_project/pages/login_page.dart';
 import 'package:year4_project/pages/signup_page.dart';
 import 'package:year4_project/pages/waiting_room.dart';
 import 'package:year4_project/pages/challenges_page.dart';
-import 'package:year4_project/pages/active_run_page.dart';
+import 'package:year4_project/pages/run_loading_page.dart';
 import 'package:year4_project/pages/duo_active_run_page.dart';
 import 'package:year4_project/pages/league_room_page.dart';
 import 'package:year4_project/pages/journey_type_page.dart';
@@ -31,34 +30,27 @@ Future<void> initSupabase() async {
 
 Future<void> requestLocationPermission() async {
   try {
-    // First check if location services are enabled
+    // First, check if location services are enabled.
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      // Location services are not enabled, show dialog to the user
       print('Location services disabled. Cannot request permission.');
       return;
     }
 
-    // Special handling for iOS
     if (Platform.isIOS) {
-      // For iOS, we need to be more explicit about the permission request
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        // Request location permission with more explicit messaging
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           print('Location permissions denied on iOS');
           return;
         }
       }
-
       if (permission == LocationPermission.deniedForever) {
-        // Show a dialog directing user to settings
         print('Location permissions permanently denied on iOS, guide user to settings');
         return;
       }
     } else {
-      // Original Android code path
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -69,13 +61,14 @@ Future<void> requestLocationPermission() async {
       }
     }
 
-    // Test location access with a shorter timeout for iOS
+    // Test location access.
     try {
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 5),
       );
-      print('Current location: ${position.latitude}, ${position.longitude}, accuracy: ${position.accuracy}m');
+      print(
+          'Current location: ${position.latitude}, ${position.longitude}, accuracy: ${position.accuracy}m');
     } catch (e) {
       print('Error getting current position: $e');
     }
@@ -89,16 +82,16 @@ void main() async {
   await dotenv.load();
   await initSupabase();
 
-  // Request location permissions early in the app lifecycle
+  // Request location permissions early.
   await requestLocationPermission();
 
   final authService = AuthService();
   final isAuthenticated = await authService.checkAuthStatus();
 
-  // Create initial UserModel
+  // Create initial UserModel.
   UserModel initialUserModel = UserModel(id: 0, email: '', name: '');
 
-  // If authenticated, try to restore user data
+  // If authenticated, restore user data.
   if (isAuthenticated) {
     final userData = await authService.restoreUserSession();
     if (userData != null) {
@@ -148,23 +141,21 @@ class MyApp extends StatelessWidget {
         '/challenges': (context) => const ChallengesPage(),
         '/journey_type': (context) => const JourneyTypePage(),
         '/duo_waiting_room': (context) {
-          final args =
-          ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          final args = ModalRoute.of(context)!.settings.arguments
+          as Map<String, dynamic>;
           return DuoWaitingRoom(teamChallengeId: args['team_challenge_id'] as int);
         },
-        '/active_run': (context) {
-          final args =
-          ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
-          if (args['journey_type'] == 'duo') {
-            return DuoActiveRunPage(challengeId: args['team_challenge_id'] as int);
-          }
-          return ActiveRunPage(
-            journeyType: 'solo',
-            challengeId: args['challenge_id'] as int,
-          );
-        },
+        // For solo runs, navigate to the RunLoadingPage first.
+        '/run_loading': (context) =>
+        const RunLoadingPage(journeyType: 'solo', challengeId: 0),
         '/league_room': (context) => LeagueRoomPage(userId: user.id),
         '/history': (context) => const HistoryPage(),
+        // For duo active run.
+        '/duo_active_run': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments
+          as Map<String, dynamic>;
+          return DuoActiveRunPage(challengeId: args['team_challenge_id'] as int);
+        },
       },
     );
   }
