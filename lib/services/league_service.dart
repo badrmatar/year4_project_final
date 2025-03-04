@@ -1,80 +1,65 @@
-// lib/services/league_service.dart
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:async';
+import 'dart:io';
+import 'package:geolocator/geolocator.dart';
 
-class LeagueService {
-  static final String baseUrl = dotenv.env['SUPABASE_URL'] ?? '';
-  static final String bearerToken = dotenv.env['BEARER_TOKEN'] ?? '';
+class LocationService {
+  LocationService() {
+    _initializeLocation();
+  }
 
-  static Map<String, String> get _headers => {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer $bearerToken',
-  };
+  Future<void> _initializeLocation() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    // For iOS: if permission is only "while in use", request further if needed.
+    if (Platform.isIOS && permission == LocationPermission.whileInUse) {
+      await Geolocator.requestPermission();
+    }
+  }
 
-  static Future<int?> getLeagueRoomId(int userId) async {
-    final url = '$baseUrl/functions/v1/get_active_league_room_id';
-
+  /// Gets the current location.
+  /// On iOS, we first flush any cached location by requesting a low-accuracy reading.
+  Future<Position?> getCurrentLocation() async {
     try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: _headers,
-        body: jsonEncode({'user_id': userId}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['league_room_id'] as int?;
+      if (Platform.isIOS) {
+        await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.lowest,
+          timeLimit: const Duration(seconds: 2),
+        ).catchError((_) {});
+        await Future.delayed(const Duration(seconds: 1));
       }
-      return null;
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.bestForNavigation,
+        timeLimit: const Duration(seconds: 15),
+      );
     } catch (e) {
+      print('Error getting location: $e');
       return null;
     }
   }
 
-  static Future<Map<String, dynamic>> getLeagueData(int leagueRoomId) async {
-    try {
-      final pointsResponse = await http.post(
-        Uri.parse('$baseUrl/functions/v1/get_team_points'),
-        headers: _headers,
-        body: jsonEncode({'league_room_id': leagueRoomId}),
+  /// Provides a stream of location updates.
+  Stream<Position> trackLocation() {
+    LocationSettings locationSettings;
+    if (Platform.isIOS) {
+      locationSettings = AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 5,
+        activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+        allowBackgroundLocationUpdates: true,
+        showBackgroundLocationIndicator: true,
       );
-
-      final membersResponse = await http.post(
-        Uri.parse('$baseUrl/functions/v1/get_league_teams'),
-        headers: _headers,
-        body: jsonEncode({'league_room_id': leagueRoomId}),
+    } else {
+      locationSettings = AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+        forceLocationManager: false,
+        intervalDuration: const Duration(seconds: 1),
       );
-
-      if (pointsResponse.statusCode == 200 && membersResponse.statusCode == 200) {
-        final pointsData = jsonDecode(pointsResponse.body);
-        final membersData = jsonDecode(membersResponse.body);
-
-        return {
-          'pointsData': pointsData,
-          'membersData': membersData,
-        };
-      } else {
-        throw Exception('Failed to fetch team data');
-      }
-    } catch (e) {
-      rethrow;
     }
-  }
-
-  static Future<bool> endLeague(int leagueRoomId) async {
-    final url = '$baseUrl/functions/v1/end_league_room';
-
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: _headers,
-        body: jsonEncode({'league_room_id': leagueRoomId}),
-      );
-
-      return response.statusCode == 200;
-    } catch (e) {
-      return false;
-    }
+    return Geolocator.getPositionStream(locationSettings: locationSettings)
+        .where((position) => position.accuracy > 0);
   }
 }
