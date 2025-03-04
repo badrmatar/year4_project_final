@@ -29,18 +29,37 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
   Position? _bestPosition;
   double _signalQualityPercentage = 0;
   Timer? _elapsedTimer;
+  Timer? _autoStartTimer;
+
+  // Define the thresholds
+  static const int AUTO_START_SECONDS = 5;
+  static const double ACCEPTABLE_ACCURACY = 60.0; // meters
+  static const double GOOD_ACCURACY = 50.0; // meters for "good signal" indicator
 
   @override
   void initState() {
     super.initState();
     _initializeLocationTracking();
 
-    // Timer to update elapsed time display (not a fallback)
+    // Timer to update elapsed time display
     _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {
           _elapsedSeconds++;
         });
+
+        // Check if we should auto-start after AUTO_START_SECONDS
+        if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition != null) {
+          if (_bestPosition!.accuracy <= ACCEPTABLE_ACCURACY) {
+            // Cancel timers to avoid multiple calls
+            _autoStartTimer?.cancel();
+            _autoStartTimer = Timer(const Duration(milliseconds: 500), () {
+              if (mounted) {
+                _startRun();
+              }
+            });
+          }
+        }
       }
     });
   }
@@ -100,12 +119,24 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
           _bestPosition = _locationService.lastPosition;
         });
 
-        // Only enable start button when accuracy is under 50m
-        if (_bestPosition != null && _bestPosition!.accuracy < 50) {
+        // Enable "good signal" indicator when accuracy is under GOOD_ACCURACY
+        if (_bestPosition != null && _bestPosition!.accuracy < GOOD_ACCURACY) {
           setState(() {
             _isWaitingForSignal = false;
             _hasGoodSignal = true;
             _statusMessage = "GPS signal acquired! Ready to start.";
+          });
+        }
+
+        // Auto-start check if we've hit the time threshold and have acceptable accuracy
+        if (_elapsedSeconds >= AUTO_START_SECONDS &&
+            _bestPosition != null &&
+            _bestPosition!.accuracy <= ACCEPTABLE_ACCURACY) {
+          _autoStartTimer?.cancel();
+          _autoStartTimer = Timer(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              _startRun();
+            }
           });
         }
       }
@@ -114,6 +145,10 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
 
   void _startRun() {
     if (_bestPosition == null) return;
+
+    // Cancel timers to prevent further callbacks
+    _elapsedTimer?.cancel();
+    _autoStartTimer?.cancel();
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -130,6 +165,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
   void dispose() {
     _locationService.stopQualityMonitoring();
     _elapsedTimer?.cancel();
+    _autoStartTimer?.cancel();
     super.dispose();
   }
 
@@ -225,15 +261,27 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                   fontSize: 14,
                 ),
               ),
-              Text(
-                _bestPosition!.accuracy < 50
-                    ? 'Good accuracy achieved!'
-                    : 'Waiting for better accuracy (need < 50m)',
-                style: TextStyle(
-                  color: _bestPosition!.accuracy < 50 ? Colors.green : Colors.orange,
-                  fontSize: 14,
+              if (_elapsedSeconds >= AUTO_START_SECONDS)
+                Text(
+                  _bestPosition!.accuracy <= ACCEPTABLE_ACCURACY
+                      ? 'Auto-starting run with current accuracy...'
+                      : 'Waiting for better accuracy (need < ${ACCEPTABLE_ACCURACY}m)',
+                  style: TextStyle(
+                    color: _bestPosition!.accuracy <= ACCEPTABLE_ACCURACY ? Colors.green : Colors.orange,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              else
+                Text(
+                  _bestPosition!.accuracy < GOOD_ACCURACY
+                      ? 'Good accuracy achieved!'
+                      : 'Waiting for better accuracy (need < ${GOOD_ACCURACY}m)',
+                  style: TextStyle(
+                    color: _bestPosition!.accuracy < GOOD_ACCURACY ? Colors.green : Colors.orange,
+                    fontSize: 14,
+                  ),
                 ),
-              ),
             ],
             const SizedBox(height: 48),
             // Action buttons
@@ -251,7 +299,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                // Start run button - only enabled if we have good accuracy
+                // Start run button - enabled if we have good accuracy
                 ElevatedButton.icon(
                   onPressed: _hasGoodSignal ? _startRun : null,
                   icon: const Icon(Icons.play_arrow),
