@@ -1,3 +1,4 @@
+// lib/pages/active_run_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -27,31 +28,67 @@ class ActiveRunPage extends StatefulWidget {
 }
 
 class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
+  // Freshness threshold: only consider a reading fresh if its timestamp is within 5 seconds.
+  final int _freshnessThresholdSeconds = 5;
+  // Accuracy threshold: we want to start if accuracy is below 50m.
+  final double _acceptableAccuracyThreshold = 50.0;
+
+  StreamSubscription<Position>? _startRunSubscription;
+
   @override
   void initState() {
     super.initState();
-    // For both iOS and Android, directly get the current location.
-    locationService.getCurrentLocation().then((position) {
-      if (position != null && mounted) {
-        setState(() {
-          currentLocation = position;
-        });
-        // Start run if the reading is good enough.
-        if (position.accuracy < 20) {
-          startRun(position);
-        }
+    // Subscribe to location updates.
+    // We use the locationService's stream so that we can ignore any stale cached location.
+    _startRunSubscription = locationService.trackLocation().listen((position) {
+      if (position.timestamp == null) return; // Skip if no timestamp.
+      final age = DateTime.now().difference(position.timestamp!).inSeconds;
+      // For debugging:
+      // print("Received location with accuracy ${position.accuracy.toStringAsFixed(1)}m, age: ${age}s");
+
+      // Update UI with latest reading.
+      setState(() {
+        currentLocation = position;
+      });
+
+      // Only start the run if we have a fresh reading (age <= threshold)
+      // and the accuracy is acceptable (<50m).
+      if (!isTracking &&
+          age <= _freshnessThresholdSeconds &&
+          position.accuracy < _acceptableAccuracyThreshold) {
+        // Cancel further subscriptions since we are now starting the run.
+        _startRunSubscription?.cancel();
+        startRun(position);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Run started with accuracy: ${position.accuracy.toStringAsFixed(1)}m',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     });
 
-    // Fallback: if after 30 seconds we haven't started tracking, force start.
+    // Fallback: If after 30 seconds no fresh reading has been found,
+    // start the run with the latest reading regardless.
     Timer(const Duration(seconds: 30), () {
-      if (currentLocation != null && mounted && !isTracking) {
+      if (!isTracking && currentLocation != null) {
+        _startRunSubscription?.cancel();
         startRun(currentLocation!);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Fallback: Run started with accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     });
   }
 
-  /// Called when the user taps "End Run".
+  /// Called when the user taps "End Run"
   void _endRunAndSave() {
     if (currentLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -129,6 +166,12 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   }
 
   @override
+  void dispose() {
+    _startRunSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final distanceKm = distanceCovered / 1000;
     return Scaffold(
@@ -139,7 +182,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             initialCameraPosition: CameraPosition(
               target: currentLocation != null
                   ? LatLng(currentLocation!.latitude, currentLocation!.longitude)
-                  : const LatLng(37.4219999, -122.0840575), // Default: Mountain View, CA
+                  : const LatLng(37.4219999, -122.0840575),
               zoom: 15,
             ),
             myLocationEnabled: true,
