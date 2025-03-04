@@ -1,4 +1,3 @@
-// lib/pages/active_run_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -14,11 +13,13 @@ import '../mixins/run_tracking_mixin.dart';
 import '../widgets/run_metrics_card.dart';
 
 class ActiveRunPage extends StatefulWidget {
+  final Position initialPosition;
   final String journeyType;
   final int challengeId;
 
   const ActiveRunPage({
     Key? key,
+    required this.initialPosition,
     required this.journeyType,
     required this.challengeId,
   }) : super(key: key);
@@ -28,96 +29,14 @@ class ActiveRunPage extends StatefulWidget {
 }
 
 class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
-  // --- Configuration thresholds ---
-  final double _targetAccuracy = 35.0; // We require accuracy under 35m
-  final Duration _minWaitingDuration = const Duration(seconds: 3);
-  final Duration _fallbackDuration = const Duration(seconds: 30);
-
-  // --- State variables for waiting ---
-  bool _hasGoodFix = false;
-  bool _isWaiting = true;
-  DateTime _waitingStartTime = DateTime.now();
-  StreamSubscription<Position>? _fixSubscription;
-  String _loadingDebug = "Initializing GPS...";
-
   @override
   void initState() {
     super.initState();
-    // Reset state for a new run.
-    resetRunState();
-    // Begin waiting for a fresh fix.
-    _startWaitingForFix();
-    // Fallback: If no acceptable fix is obtained within fallback time, use the latest reading.
-    Timer(_fallbackDuration, () {
-      if (!_hasGoodFix && currentLocation != null) {
-        _fixSubscription?.cancel();
-        _hasGoodFix = true;
-        startRun(currentLocation!);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Fallback: Run started with accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        setState(() {
-          _isWaiting = false;
-        });
-      }
-    });
+    // Immediately start the run using the provided initialPosition.
+    startRun(widget.initialPosition);
   }
 
-  /// Reset all state variables so that a new run starts fresh.
-  void resetRunState() {
-    setState(() {
-      _isWaiting = true;
-      _hasGoodFix = false;
-      _waitingStartTime = DateTime.now();
-      currentLocation = null;
-      // Also clear routePoints and reset elapsed time.
-      routePoints.clear();
-      routePolyline = routePolyline.copyWith(pointsParam: routePoints);
-      secondsElapsed = 0;
-      distanceCovered = 0.0;
-    });
-  }
-
-  /// Subscribes to the location stream and waits until a fresh reading is acquired.
-  void _startWaitingForFix() {
-    _fixSubscription = locationService.trackLocation().listen((position) {
-      // Only consider readings acquired after waiting started.
-      if (position.timestamp == null || !position.timestamp!.isAfter(_waitingStartTime)) {
-        return;
-      }
-      // Update current location and debug message.
-      setState(() {
-        currentLocation = position;
-        _loadingDebug = "Current Accuracy: ${position.accuracy.toStringAsFixed(1)}m";
-      });
-      final elapsed = DateTime.now().difference(_waitingStartTime);
-      // When at least 3 seconds have elapsed and accuracy is good enough, accept the fix.
-      if (elapsed >= _minWaitingDuration && position.accuracy < _targetAccuracy) {
-        _fixSubscription?.cancel();
-        _hasGoodFix = true;
-        startRun(position);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Run started with accuracy: ${position.accuracy.toStringAsFixed(1)}m'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        setState(() {
-          _isWaiting = false;
-        });
-      }
-    }, onError: (error) {
-      setState(() {
-        _loadingDebug = "Error: $error";
-      });
-    });
-  }
-
-  /// Called when the user taps "End Run".
+  /// Called when the user taps "End Run"
   void _endRunAndSave() {
     if (currentLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,8 +46,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     }
     endRun();
     _saveRunData();
-    // Reset state for the next run.
-    resetRunState();
   }
 
   Future<void> _saveRunData() async {
@@ -170,6 +87,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         },
         body: jsonEncode(requestBody),
       );
+
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Run saved successfully!')),
@@ -196,44 +114,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   }
 
   @override
-  void dispose() {
-    _fixSubscription?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // While waiting for a good fix, show the loading page.
-    if (_isWaiting) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Waiting for GPS Fix')),
-        body: Container(
-          color: Colors.black,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(color: Colors.green),
-                const SizedBox(height: 20),
-                Text(
-                  _loadingDebug,
-                  style: const TextStyle(color: Colors.white, fontSize: 18),
-                ),
-                const SizedBox(height: 10),
-                if (currentLocation != null)
-                  Text(
-                    'Lat: ${currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${currentLocation!.longitude.toStringAsFixed(6)}',
-                    style: const TextStyle(color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // Once a good fix is obtained, show the main map page.
     final distanceKm = distanceCovered / 1000;
     return Scaffold(
       appBar: AppBar(title: const Text('Active Run')),
