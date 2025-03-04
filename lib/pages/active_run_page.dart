@@ -29,31 +29,29 @@ class ActiveRunPage extends StatefulWidget {
 
 class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   // --- Configuration thresholds ---
-  final double _targetAccuracy = 35.0; // Must be below 35m
+  final double _targetAccuracy = 35.0; // We require accuracy under 35m
   final Duration _minWaitingDuration = const Duration(seconds: 3);
   final Duration _fallbackDuration = const Duration(seconds: 30);
 
-  // --- State variables ---
+  // --- State variables for waiting ---
   bool _hasGoodFix = false;
   bool _isWaiting = true;
   DateTime _waitingStartTime = DateTime.now();
   StreamSubscription<Position>? _fixSubscription;
-
-  // Declare the _loadingDebug variable.
   String _loadingDebug = "Initializing GPS...";
 
   @override
   void initState() {
     super.initState();
-    // Record the waiting start time.
-    _waitingStartTime = DateTime.now();
+    // Reset state for a new run.
+    resetRunState();
+    // Begin waiting for a fresh fix.
     _startWaitingForFix();
-    // Fallback: If after _fallbackDuration no good fix is found, use the latest reading.
+    // Fallback: If no acceptable fix is obtained within fallback time, use the latest reading.
     Timer(_fallbackDuration, () {
       if (!_hasGoodFix && currentLocation != null) {
         _fixSubscription?.cancel();
         _hasGoodFix = true;
-        // Use the latest reading regardless of accuracy.
         startRun(currentLocation!);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -69,34 +67,42 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     });
   }
 
+  /// Reset all state variables so that a new run starts fresh.
+  void resetRunState() {
+    setState(() {
+      _isWaiting = true;
+      _hasGoodFix = false;
+      _waitingStartTime = DateTime.now();
+      currentLocation = null;
+      // Also clear routePoints and reset elapsed time.
+      routePoints.clear();
+      routePolyline = routePolyline.copyWith(pointsParam: routePoints);
+      secondsElapsed = 0;
+      distanceCovered = 0.0;
+    });
+  }
+
   /// Subscribes to the location stream and waits until a fresh reading is acquired.
   void _startWaitingForFix() {
     _fixSubscription = locationService.trackLocation().listen((position) {
-      // Only consider readings that are acquired after waiting started.
-      if (position.timestamp == null ||
-          !position.timestamp!.isAfter(_waitingStartTime)) {
+      // Only consider readings acquired after waiting started.
+      if (position.timestamp == null || !position.timestamp!.isAfter(_waitingStartTime)) {
         return;
       }
-
-      // Update the currentLocation for display purposes.
+      // Update current location and debug message.
       setState(() {
         currentLocation = position;
-        _loadingDebug =
-        "Current Accuracy: ${position.accuracy.toStringAsFixed(1)}m";
+        _loadingDebug = "Current Accuracy: ${position.accuracy.toStringAsFixed(1)}m";
       });
-
       final elapsed = DateTime.now().difference(_waitingStartTime);
-
-      if (elapsed >= _minWaitingDuration &&
-          position.accuracy < _targetAccuracy) {
-        // Good fix obtained.
+      // When at least 3 seconds have elapsed and accuracy is good enough, accept the fix.
+      if (elapsed >= _minWaitingDuration && position.accuracy < _targetAccuracy) {
         _fixSubscription?.cancel();
         _hasGoodFix = true;
         startRun(position);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-                'Run started with accuracy: ${position.accuracy.toStringAsFixed(1)}m'),
+            content: Text('Run started with accuracy: ${position.accuracy.toStringAsFixed(1)}m'),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -105,14 +111,13 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         });
       }
     }, onError: (error) {
-      // Optionally handle errors.
       setState(() {
         _loadingDebug = "Error: $error";
       });
     });
   }
 
-  /// Called when the user taps "End Run"
+  /// Called when the user taps "End Run".
   void _endRunAndSave() {
     if (currentLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -122,6 +127,8 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     }
     endRun();
     _saveRunData();
+    // Reset state for the next run.
+    resetRunState();
   }
 
   Future<void> _saveRunData() async {
@@ -163,7 +170,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         },
         body: jsonEncode(requestBody),
       );
-
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Run saved successfully!')),
@@ -197,7 +203,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
   @override
   Widget build(BuildContext context) {
-    // If still waiting for a good fix, show the waiting/loading screen.
+    // While waiting for a good fix, show the loading page.
     if (_isWaiting) {
       return Scaffold(
         appBar: AppBar(title: const Text('Waiting for GPS Fix')),
