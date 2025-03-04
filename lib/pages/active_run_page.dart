@@ -297,7 +297,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     if (!mounted) return;
 
     setState(() => _debugStatus = "Verifying position before starting...");
-
     try {
       // Get one final fresh position with high accuracy requirements
       final finalPosition = await Geolocator.getCurrentPosition(
@@ -305,7 +304,21 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         timeLimit: const Duration(seconds: 10),
       );
 
-      // If the verified position meets the threshold, use it
+      // Check if the final reading is recent (not stale).
+      if (finalPosition.timestamp == null ||
+          DateTime.now().difference(finalPosition.timestamp!).inSeconds > 5) {
+        setState(() => _debugStatus =
+        "Verified position is stale (${finalPosition.timestamp == null ? 'unknown' : DateTime.now().difference(finalPosition.timestamp!).inSeconds}s old).");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Location reading is stale. Please wait for a fresh reading."),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        _initializeLocationTracking();
+        return;
+      }
+
       if (finalPosition.accuracy <= _acceptableAccuracyThreshold &&
           _isValidAccuracy(finalPosition.accuracy)) {
         position = finalPosition;
@@ -319,21 +332,22 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       "Using best available position (${position.accuracy.toStringAsFixed(1)}m) due to error: $e");
     }
 
-    // Enforce that the final position meets the strict accuracy requirement.
-    if (position.accuracy > _acceptableAccuracyThreshold) {
+    // Enforce that the final position meets the strict requirements (accuracy and freshness).
+    if (position.accuracy > _acceptableAccuracyThreshold ||
+        (position.timestamp != null &&
+            DateTime.now().difference(position.timestamp!).inSeconds > 5)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              'GPS accuracy (${position.accuracy.toStringAsFixed(1)}m) is above the required threshold. Please try again in an open area.'),
+              'GPS reading is not fresh or accurate (accuracy: ${position.accuracy.toStringAsFixed(1)}m). Please try again in an open area.'),
           duration: const Duration(seconds: 5),
         ),
       );
-      // Optionally, reinitialize the location tracking so the user can get a better reading.
       _initializeLocationTracking();
       return;
     }
 
-    // Now start the run as accuracy is acceptable.
+    // Now start the run as the position is acceptable.
     setState(() {
       _isInitializing = false;
       _debugStatus = "Starting run!";
