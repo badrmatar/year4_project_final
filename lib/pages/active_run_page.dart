@@ -28,59 +28,87 @@ class ActiveRunPage extends StatefulWidget {
 }
 
 class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
-  // --- Thresholds & State Variables ---
-  final double _acceptableAccuracyThreshold = 60.0; // Start run when accuracy < 60m
-  bool _hasGoodFix = false; // Whether a good GPS fix has been obtained.
+  // --- Configuration thresholds ---
+  final double _targetAccuracy = 35.0; // Must be below 35m
+  final Duration _minWaitingDuration = const Duration(seconds: 3);
+  final Duration _fallbackDuration = const Duration(seconds: 30);
+
+  // --- State variables ---
+  bool _hasGoodFix = false;
+  bool _isWaiting = true;
+  DateTime _waitingStartTime = DateTime.now();
   StreamSubscription<Position>? _fixSubscription;
+
+  // Declare the _loadingDebug variable.
   String _loadingDebug = "Initializing GPS...";
 
   @override
   void initState() {
     super.initState();
-    // Subscribe to location stream and update live until a good fix is reached.
-    _fixSubscription = locationService.trackLocation().listen((position) {
-      // Update current location for display purposes.
-      setState(() {
-        currentLocation = position;
-        _loadingDebug =
-        "Current accuracy: ${position.accuracy.toStringAsFixed(1)}m";
-      });
-
-      // Check if this reading is fresh enough.
-      if (position.accuracy < _acceptableAccuracyThreshold) {
-        // We got a good fix.
-        _fixSubscription?.cancel();
-        _hasGoodFix = true;
-        // Start the run with this verified reading.
-        startRun(position);
-        // You can optionally show a SnackBar.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'GPS fix acquired with ${position.accuracy.toStringAsFixed(1)}m accuracy'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        // Trigger a rebuild so that the main map view is shown.
-        setState(() {});
-      }
-    });
-
-    // Fallback: If after 30 seconds no good fix is found, use the latest reading.
-    Timer(const Duration(seconds: 30), () {
+    // Record the waiting start time.
+    _waitingStartTime = DateTime.now();
+    _startWaitingForFix();
+    // Fallback: If after _fallbackDuration no good fix is found, use the latest reading.
+    Timer(_fallbackDuration, () {
       if (!_hasGoodFix && currentLocation != null) {
         _fixSubscription?.cancel();
         _hasGoodFix = true;
+        // Use the latest reading regardless of accuracy.
         startRun(currentLocation!);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'Fallback: using current accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m'),
+                'Fallback: Run started with accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m'),
             duration: const Duration(seconds: 2),
           ),
         );
-        setState(() {});
+        setState(() {
+          _isWaiting = false;
+        });
       }
+    });
+  }
+
+  /// Subscribes to the location stream and waits until a fresh reading is acquired.
+  void _startWaitingForFix() {
+    _fixSubscription = locationService.trackLocation().listen((position) {
+      // Only consider readings that are acquired after waiting started.
+      if (position.timestamp == null ||
+          !position.timestamp!.isAfter(_waitingStartTime)) {
+        return;
+      }
+
+      // Update the currentLocation for display purposes.
+      setState(() {
+        currentLocation = position;
+        _loadingDebug =
+        "Current Accuracy: ${position.accuracy.toStringAsFixed(1)}m";
+      });
+
+      final elapsed = DateTime.now().difference(_waitingStartTime);
+
+      if (elapsed >= _minWaitingDuration &&
+          position.accuracy < _targetAccuracy) {
+        // Good fix obtained.
+        _fixSubscription?.cancel();
+        _hasGoodFix = true;
+        startRun(position);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Run started with accuracy: ${position.accuracy.toStringAsFixed(1)}m'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        setState(() {
+          _isWaiting = false;
+        });
+      }
+    }, onError: (error) {
+      // Optionally handle errors.
+      setState(() {
+        _loadingDebug = "Error: $error";
+      });
     });
   }
 
@@ -169,10 +197,10 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
   @override
   Widget build(BuildContext context) {
-    // If we haven't gotten a good fix, show the loading screen.
-    if (!_hasGoodFix) {
+    // If still waiting for a good fix, show the waiting/loading screen.
+    if (_isWaiting) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Acquiring GPS Signal')),
+        appBar: AppBar(title: const Text('Waiting for GPS Fix')),
         body: Container(
           color: Colors.black,
           child: Center(
@@ -199,7 +227,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       );
     }
 
-    // Once we have a good fix, show the main map page and run metrics.
+    // Once a good fix is obtained, show the main map page.
     final distanceKm = distanceCovered / 1000;
     return Scaffold(
       appBar: AppBar(title: const Text('Active Run')),
@@ -240,7 +268,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                 ),
               ),
             ),
-          // You can also add a button to manually retry if needed.
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
