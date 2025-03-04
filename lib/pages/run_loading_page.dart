@@ -24,20 +24,28 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
   bool _isWaitingForSignal = true;
   bool _hasGoodSignal = false;
   int _elapsedSeconds = 0;
-  int _maxWaitSeconds = 30; // Maximum seconds to wait for a good signal
   String _statusMessage = "Acquiring GPS signal...";
   LocationQuality _currentQuality = LocationQuality.unusable;
   Position? _bestPosition;
   double _signalQualityPercentage = 0;
+  Timer? _elapsedTimer;
 
   @override
   void initState() {
     super.initState();
     _initializeLocationTracking();
+
+    // Timer to update elapsed time display (not a fallback)
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _elapsedSeconds++;
+        });
+      }
+    });
   }
 
   Future<void> _initializeLocationTracking() async {
-    // Start by getting a single location to initialize
     final initialPosition = await _locationService.getCurrentLocation();
     if (initialPosition != null) {
       setState(() {
@@ -46,14 +54,9 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
         _updateSignalQuality(_currentQuality);
       });
 
-      // Initialize Kalman filter with initial position
       _locationService.initializeKalmanFilter(initialPosition);
-
-      // Start monitoring for quality
       _locationService.startQualityMonitoring();
-
-      // Wait for good accuracy
-      _waitForAccuracy();
+      _monitorLocationQuality();
     } else {
       setState(() {
         _statusMessage = "Unable to get initial location";
@@ -82,38 +85,31 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
     }
   }
 
-  Future<void> _waitForAccuracy() async {
-    final result = await _locationService.waitForGoodAccuracy(
-        timeout: Duration(seconds: _maxWaitSeconds),
-        onProgress: (seconds, quality) {
-          if (mounted) {
-            setState(() {
-              _elapsedSeconds = seconds;
-              _currentQuality = quality;
-              _updateSignalQuality(quality);
-              _statusMessage = _locationService.getQualityDescription(quality);
+  void _monitorLocationQuality() {
+    _locationService.qualityStream.listen((quality) {
+      if (!mounted) return;
 
-              // Update best position if available
-              if (_locationService.lastPosition != null) {
-                _bestPosition = _locationService.lastPosition;
-              }
-            });
-          }
-        }
-    );
-
-    if (mounted) {
       setState(() {
-        _isWaitingForSignal = false;
-        _hasGoodSignal = result;
-
-        if (result) {
-          _statusMessage = "GPS signal acquired! Ready to start.";
-        } else {
-          _statusMessage = "Unable to get a good GPS signal. Try moving to an open area.";
-        }
+        _currentQuality = quality;
+        _updateSignalQuality(quality);
+        _statusMessage = _locationService.getQualityDescription(quality);
       });
-    }
+
+      if (_locationService.lastPosition != null) {
+        setState(() {
+          _bestPosition = _locationService.lastPosition;
+        });
+
+        // Only enable start button when accuracy is under 50m
+        if (_bestPosition != null && _bestPosition!.accuracy < 50) {
+          setState(() {
+            _isWaitingForSignal = false;
+            _hasGoodSignal = true;
+            _statusMessage = "GPS signal acquired! Ready to start.";
+          });
+        }
+      }
+    });
   }
 
   void _startRun() {
@@ -130,13 +126,10 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
     );
   }
 
-  void _goBack() {
-    Navigator.of(context).pop();
-  }
-
   @override
   void dispose() {
     _locationService.stopQualityMonitoring();
+    _elapsedTimer?.cancel();
     super.dispose();
   }
 
@@ -182,9 +175,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      _isWaitingForSignal
-                          ? "${_elapsedSeconds}s / ${_maxWaitSeconds}s"
-                          : _hasGoodSignal ? "Ready!" : "Signal Issue",
+                      _elapsedSeconds.toString() + "s",
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 16,
@@ -234,6 +225,15 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                   fontSize: 14,
                 ),
               ),
+              Text(
+                _bestPosition!.accuracy < 50
+                    ? 'Good accuracy achieved!'
+                    : 'Waiting for better accuracy (need < 50m)',
+                style: TextStyle(
+                  color: _bestPosition!.accuracy < 50 ? Colors.green : Colors.orange,
+                  fontSize: 14,
+                ),
+              ),
             ],
             const SizedBox(height: 48),
             // Action buttons
@@ -242,7 +242,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
               children: [
                 // Cancel button
                 ElevatedButton.icon(
-                  onPressed: _goBack,
+                  onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Cancel'),
                   style: ElevatedButton.styleFrom(
@@ -251,33 +251,19 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                // Start run button - only enabled if we have a good signal or if wait is over
+                // Start run button - only enabled if we have good accuracy
                 ElevatedButton.icon(
-                  onPressed: (!_isWaitingForSignal && (_hasGoodSignal || _elapsedSeconds >= _maxWaitSeconds))
-                      ? _startRun
-                      : null,
+                  onPressed: _hasGoodSignal ? _startRun : null,
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Start Run'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    // If signal is poor, show button in disabled state
                     disabledBackgroundColor: Colors.grey,
                   ),
                 ),
               ],
             ),
-            if (!_isWaitingForSignal && !_hasGoodSignal) ...[
-              const SizedBox(height: 24),
-              const Text(
-                'Tip: Move to an open area away from buildings or trees for better GPS signal.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: 14,
-                ),
-              ),
-            ],
           ],
         ),
       ),

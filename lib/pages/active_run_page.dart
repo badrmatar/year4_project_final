@@ -229,6 +229,7 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       _manuallyPaused = !_manuallyPaused;
     });
   }
+  // Update this method to redirect to challenges page
   Future<void> _endRunAndSave() async {
     if (_routePoints.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -272,8 +273,8 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       // Pop the loading dialog
       if (mounted) Navigator.of(context).pop();
 
-      // Show run summary
-      _showRunSummary();
+      // Navigate directly to challenges page after saving
+      Navigator.of(context).pushReplacementNamed('/challenges');
     } catch (e) {
       // Pop the loading dialog
       if (mounted) Navigator.of(context).pop();
