@@ -8,27 +8,21 @@ class LocationService {
   }
 
   Future<void> _initializeLocation() async {
+    // Check and request location permissions if necessary.
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    // For iOS: if permission is only "while in use", request further if needed.
+    // For iOS, if we only have "while in use" permission, request additional permission if needed.
     if (Platform.isIOS && permission == LocationPermission.whileInUse) {
       await Geolocator.requestPermission();
     }
   }
 
-  /// Gets the current location.
-  /// On iOS, we first flush any cached location by requesting a low-accuracy reading.
+  /// Returns the current location.
   Future<Position?> getCurrentLocation() async {
     try {
-      if (Platform.isIOS) {
-        await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.lowest,
-          timeLimit: const Duration(seconds: 2),
-        ).catchError((_) {});
-        await Future.delayed(const Duration(seconds: 1));
-      }
+      // Use the same call for both iOS and Android.
       return await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
         timeLimit: const Duration(seconds: 15),
