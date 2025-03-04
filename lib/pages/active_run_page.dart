@@ -40,6 +40,9 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   final double _goodAccuracyThreshold = 20.0;     // Ideal accuracy
   final double _acceptableAccuracyThreshold = 50.0; // Maximum allowed accuracy
 
+  // Freshness threshold in seconds
+  final int _freshnessThresholdSeconds = 10;
+
   @override
   void initState() {
     super.initState();
@@ -53,18 +56,13 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
     // Filter out other common suspicious values
     if (Platform.isIOS) {
-      // iOS also often reports exactly 65.0m as a default
       if (accuracy == 65.0) return false;
-      // And sometimes these other specific values
       if (accuracy == 10.0 && _locationAttempts <= 2) return false;
       if (accuracy == 100.0) return false;
-      // For iOS, be more strict about max permitted values
       if (accuracy > 200.0) return false;
     } else {
-      // For Android, less strict
       if (accuracy > 500.0) return false;
     }
-
     return true;
   }
 
@@ -73,17 +71,11 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     if (positions.isEmpty) {
       throw Exception("No positions to choose from");
     }
-
-    // Filter out suspicious accuracy values
     final validPositions = positions.where((pos) => _isValidAccuracy(pos.accuracy)).toList();
-
     if (validPositions.isEmpty) {
-      // If all positions had suspicious values, use all positions
       positions.sort((a, b) => a.accuracy.compareTo(b.accuracy));
       return positions.first;
     }
-
-    // Sort by accuracy (lower is better)
     validPositions.sort((a, b) => a.accuracy.compareTo(b.accuracy));
     return validPositions.first;
   }
@@ -96,7 +88,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       _positionSamples = [];
     });
 
-    // Check if location services are enabled
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     setState(() => _debugStatus = "Location services enabled: $serviceEnabled");
 
@@ -113,12 +104,10 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       return;
     }
 
-    // Check permission status
     LocationPermission permission = await Geolocator.checkPermission();
     setState(() => _debugStatus = "Initial permission status: $permission");
 
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      // Request permission and check again
       setState(() => _debugStatus = "Requesting permission...");
       permission = await Geolocator.requestPermission();
       setState(() => _debugStatus = "After request, permission status: $permission");
@@ -136,20 +125,16 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         return;
       }
     }
-
-    // Start waiting for good location accuracy
     _startLocationSamplingUntilGoodAccuracy();
   }
 
   /// Start continuous sampling of location UNTIL good accuracy is found
   void _startLocationSamplingUntilGoodAccuracy() {
-    // Cancel any existing subscriptions/timers
     _locationSamplingTimer?.cancel();
     _locationSamplingSubscription?.cancel();
 
     setState(() => _debugStatus = "Setting up location tracking...");
 
-    // Create platform-specific location settings
     final LocationSettings locationSettings = Platform.isIOS
         ? AppleSettings(
       accuracy: LocationAccuracy.bestForNavigation,
@@ -162,20 +147,16 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         : AndroidSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 0,
-      forceLocationManager: true, // Use GPS directly for better accuracy
+      forceLocationManager: true,
     );
 
-    // On iOS, try to clear any cached values first
     if (Platform.isIOS) {
       setState(() => _debugStatus = "Resetting iOS location cache...");
-      // Try a quick position request to flush the cache
       Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.lowest,
           timeLimit: const Duration(seconds: 2))
-          .catchError((_) {
-        // Ignore errors - this is just to flush the system
-      }).then((_) {
-        // Short delay to let iOS reset
+          .catchError((_) {})
+          .then((_) {
         Future.delayed(const Duration(seconds: 1), () {
           if (mounted) {
             _beginContinuousLocationSampling(locationSettings);
@@ -183,7 +164,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         });
       });
     } else {
-      // For Android, go directly to continuous sampling
       _beginContinuousLocationSampling(locationSettings);
     }
   }
@@ -191,12 +171,8 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   /// Begin continuous sampling of location
   void _beginContinuousLocationSampling(LocationSettings locationSettings) {
     setState(() => _debugStatus = "Waiting for GPS accuracy < 50m...");
-
-    // Clear previous samples and reset attempt counter
     _positionSamples.clear();
     _locationAttempts = 0;
-
-    // Subscribe to location updates
     _locationSamplingSubscription = Geolocator.getPositionStream(
       locationSettings: locationSettings,
     ).listen(
@@ -205,26 +181,19 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
           _locationSamplingSubscription?.cancel();
           return;
         }
-
         _locationAttempts++;
         setState(() {
           currentLocation = position;
           _debugStatus = "Sample #$_locationAttempts: ${position.accuracy.toStringAsFixed(1)}m";
         });
-
-        // Only add valid readings to our samples
         if (_isValidAccuracy(position.accuracy)) {
           _positionSamples.add(position);
         }
-
-        // If we have a reading with accuracy below our threshold, start immediately
         if (position.accuracy <= _acceptableAccuracyThreshold) {
           _locationSamplingSubscription?.cancel();
-          _startRunWithPosition(position); // Start immediately with this good reading
+          _startRunWithPosition(position);
           return;
         }
-
-        // Handle suspicious readings
         if (position.accuracy == 1440.0) {
           setState(() {
             _debugStatus = "Received default iOS value (1440m). Waiting for better signal...";
@@ -237,7 +206,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       },
       onError: (error) {
         setState(() => _debugStatus = "Location error: $error");
-        // Don't cancel on error, keep trying
       },
     );
   }
@@ -246,8 +214,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   Future<void> _tryDirectLocationAcquisition() async {
     try {
       setState(() => _debugStatus = "Trying direct location acquisition...");
-
-      // Use a longer timeout and best accuracy
       final position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.best,
           timeLimit: const Duration(seconds: 15));
@@ -256,8 +222,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
           currentLocation = position;
           _debugStatus = "Direct method accuracy: ${position.accuracy.toStringAsFixed(1)}m";
         });
-
-        // Only start if accuracy is acceptable
         if (_isValidAccuracy(position.accuracy) &&
             position.accuracy <= _acceptableAccuracyThreshold) {
           _startRunWithPosition(position);
@@ -269,8 +233,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                  'GPS accuracy is too poor (must be under 50m). Please try again in an open area with clear sky view.'),
+              content: Text('GPS accuracy is too poor (must be under 50m). Please try again in an open area with clear sky view.'),
               duration: Duration(seconds: 5),
             ),
           );
@@ -295,20 +258,19 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   /// Helper to start the run with a position, but verify it first
   void _startRunWithPosition(Position position) async {
     if (!mounted) return;
-
     setState(() => _debugStatus = "Verifying position before starting...");
     try {
-      // Get one final fresh position with high accuracy requirements
       final finalPosition = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
         timeLimit: const Duration(seconds: 10),
       );
 
-      // Check if the final reading is recent (not stale).
-      if (finalPosition.timestamp == null ||
-          DateTime.now().difference(finalPosition.timestamp!).inSeconds > 5) {
+      // Use UTC for both times and check against a relaxed threshold.
+      final currentUtc = DateTime.now().toUtc();
+      final positionTimeUtc = finalPosition.timestamp?.toUtc();
+      if (positionTimeUtc == null || currentUtc.difference(positionTimeUtc).inSeconds > _freshnessThresholdSeconds) {
         setState(() => _debugStatus =
-        "Verified position is stale (${finalPosition.timestamp == null ? 'unknown' : DateTime.now().difference(finalPosition.timestamp!).inSeconds}s old).");
+        "Verified position is stale (${positionTimeUtc == null ? 'unknown' : currentUtc.difference(positionTimeUtc).inSeconds}s old).");
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Location reading is stale. Please wait for a fresh reading."),
@@ -332,10 +294,9 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       "Using best available position (${position.accuracy.toStringAsFixed(1)}m) due to error: $e");
     }
 
-    // Enforce that the final position meets the strict requirements (accuracy and freshness).
     if (position.accuracy > _acceptableAccuracyThreshold ||
         (position.timestamp != null &&
-            DateTime.now().difference(position.timestamp!).inSeconds > 5)) {
+            DateTime.now().toUtc().difference(position.timestamp!.toUtc()).inSeconds > _freshnessThresholdSeconds)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -347,19 +308,14 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       return;
     }
 
-    // Now start the run as the position is acceptable.
     setState(() {
       _isInitializing = false;
       _debugStatus = "Starting run!";
     });
-
-    // Start the run using the mixin's startRun method.
     startRun(position);
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content:
-        Text('Starting run with accuracy: ${position.accuracy.toStringAsFixed(1)}m'),
+        content: Text('Starting run with accuracy: ${position.accuracy.toStringAsFixed(1)}m'),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -388,10 +344,8 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     }
 
     final distance = double.parse(distanceCovered.toStringAsFixed(2));
-    final startTime =
-    (startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
-    final endTime =
-    (endLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
+    final startTime = (startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
+    final endTime = (endLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
     final routeJson = routePoints
         .map((point) => {'latitude': point.latitude, 'longitude': point.longitude})
         .toList();
@@ -423,7 +377,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Run saved successfully!')),
         );
-        // Navigate after a delay
         Future.delayed(const Duration(seconds: 2), () {
           Navigator.pushReplacementNamed(context, '/challenges');
         });
@@ -455,7 +408,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
   @override
   Widget build(BuildContext context) {
-    // Show loading screen during initialization
     if (_isInitializing) {
       return Scaffold(
         appBar: AppBar(title: const Text('Active Run')),
@@ -479,7 +431,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                     color: currentLocation != null ? Colors.green : Colors.white,
                   ),
                   const SizedBox(height: 16),
-                  // Debug status
                   Container(
                     padding: const EdgeInsets.all(10),
                     margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -523,7 +474,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                     onPressed: () {
                       _locationAttempts = 0;
                       _positionSamples.clear();
-                      _initializeLocationTracking(); // Re-try
+                      _initializeLocationTracking();
                     },
                     child: const Text('Retry Location'),
                   ),
@@ -553,7 +504,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                           onPressed: () {
                             _locationAttempts = 0;
                             _positionSamples.clear();
-                            _initializeLocationTracking(); // Re-try
+                            _initializeLocationTracking();
                           },
                           child: const Text('Restart GPS Search'),
                         ),
@@ -584,7 +535,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             polylines: {routePolyline},
             onMapCreated: (controller) {
               mapController = controller;
-              // For iOS, immediately move camera to current location
               if (Platform.isIOS && currentLocation != null) {
                 controller.animateCamera(
                   CameraUpdate.newLatLngZoom(
@@ -595,7 +545,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
               }
             },
           ),
-          // Metrics card
           Positioned(
             top: 20,
             left: 20,
@@ -616,7 +565,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
-                    // Add the accuracy stat
                     Row(
                       children: [
                         Text(
@@ -631,7 +579,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        // Small icon to indicate quality
                         Icon(
                           currentLocation != null &&
                               currentLocation!.accuracy <= _acceptableAccuracyThreshold
@@ -650,7 +597,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
               ),
             ),
           ),
-          // Auto-Paused indicator
           if (autoPaused)
             const Positioned(
               top: 90,
@@ -668,7 +614,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             ),
         ],
       ),
-      // End Run button
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: ElevatedButton(
         onPressed: _endRunAndSave,
