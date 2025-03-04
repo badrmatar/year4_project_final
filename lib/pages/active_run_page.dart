@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -11,7 +10,6 @@ import 'package:http/http.dart' as http;
 
 import '../models/user.dart';
 import '../mixins/run_tracking_mixin.dart';
-import '../services/location_service.dart';
 import '../widgets/run_metrics_card.dart';
 
 class ActiveRunPage extends StatefulWidget {
@@ -32,41 +30,20 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
   @override
   void initState() {
     super.initState();
-    if (Platform.isIOS) {
-      // Flush cached location on iOS to get a fresh reading.
-      Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.lowest,
-        timeLimit: const Duration(seconds: 2),
-      ).catchError((_) {}).then((_) {
-        Future.delayed(const Duration(seconds: 1), () {
-          locationService.getCurrentLocation().then((position) {
-            if (position != null && mounted) {
-              setState(() {
-                currentLocation = position;
-              });
-              // Start the run when the accuracy is good enough.
-              if (position.accuracy < 20) {
-                startRun(position);
-              }
-            }
-          });
+    // For both iOS and Android, directly get the current location.
+    locationService.getCurrentLocation().then((position) {
+      if (position != null && mounted) {
+        setState(() {
+          currentLocation = position;
         });
-      });
-    } else {
-      // Android behavior.
-      locationService.getCurrentLocation().then((position) {
-        if (position != null && mounted) {
-          setState(() {
-            currentLocation = position;
-          });
-          if (position.accuracy < 20) {
-            startRun(position);
-          }
+        // Start run if the reading is good enough.
+        if (position.accuracy < 20) {
+          startRun(position);
         }
-      });
-    }
+      }
+    });
 
-    // Fallback timer in case initialization takes too long.
+    // Fallback: if after 30 seconds we haven't started tracking, force start.
     Timer(const Duration(seconds: 30), () {
       if (currentLocation != null && mounted && !isTracking) {
         startRun(currentLocation!);
@@ -145,7 +122,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
     }
   }
 
-  /// Formats seconds into a mm:ss string.
   String _formatTime(int seconds) {
     final minutes = seconds ~/ 60;
     final remainingSeconds = seconds % 60;
@@ -163,7 +139,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             initialCameraPosition: CameraPosition(
               target: currentLocation != null
                   ? LatLng(currentLocation!.latitude, currentLocation!.longitude)
-                  : const LatLng(37.4219999, -122.0840575),
+                  : const LatLng(37.4219999, -122.0840575), // Default: Mountain View, CA
               zoom: 15,
             ),
             myLocationEnabled: true,
@@ -171,7 +147,6 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
             polylines: {routePolyline},
             onMapCreated: (controller) => mapController = controller,
           ),
-          // Use the reusable RunMetricsCard widget.
           Positioned(
             top: 20,
             left: 20,
