@@ -28,62 +28,58 @@ class ActiveRunPage extends StatefulWidget {
 }
 
 class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
-  // Freshness threshold: only consider a reading fresh if its timestamp is within 5 seconds.
-  final int _freshnessThresholdSeconds = 5;
-  // Accuracy threshold: we want to start if accuracy is below 50m.
-  final double _acceptableAccuracyThreshold = 50.0;
-
-  StreamSubscription<Position>? _startRunSubscription;
+  // --- Thresholds & State Variables ---
+  final double _acceptableAccuracyThreshold = 60.0; // Start run when accuracy < 60m
+  bool _hasGoodFix = false; // Whether a good GPS fix has been obtained.
+  StreamSubscription<Position>? _fixSubscription;
+  String _loadingDebug = "Initializing GPS...";
 
   @override
   void initState() {
     super.initState();
-    // Subscribe to location updates.
-    // We use the locationService's stream so that we can ignore any stale cached location.
-    _startRunSubscription = locationService.trackLocation().listen((position) {
-      if (position.timestamp == null) return; // Skip if no timestamp.
-      final age = DateTime.now().difference(position.timestamp!).inSeconds;
-      // For debugging:
-      // print("Received location with accuracy ${position.accuracy.toStringAsFixed(1)}m, age: ${age}s");
-
-      // Update UI with latest reading.
+    // Subscribe to location stream and update live until a good fix is reached.
+    _fixSubscription = locationService.trackLocation().listen((position) {
+      // Update current location for display purposes.
       setState(() {
         currentLocation = position;
+        _loadingDebug =
+        "Current accuracy: ${position.accuracy.toStringAsFixed(1)}m";
       });
 
-      // Only start the run if we have a fresh reading (age <= threshold)
-      // and the accuracy is acceptable (<50m).
-      if (!isTracking &&
-          age <= _freshnessThresholdSeconds &&
-          position.accuracy < _acceptableAccuracyThreshold) {
-        // Cancel further subscriptions since we are now starting the run.
-        _startRunSubscription?.cancel();
+      // Check if this reading is fresh enough.
+      if (position.accuracy < _acceptableAccuracyThreshold) {
+        // We got a good fix.
+        _fixSubscription?.cancel();
+        _hasGoodFix = true;
+        // Start the run with this verified reading.
         startRun(position);
+        // You can optionally show a SnackBar.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Run started with accuracy: ${position.accuracy.toStringAsFixed(1)}m',
-            ),
+                'GPS fix acquired with ${position.accuracy.toStringAsFixed(1)}m accuracy'),
             duration: const Duration(seconds: 2),
           ),
         );
+        // Trigger a rebuild so that the main map view is shown.
+        setState(() {});
       }
     });
 
-    // Fallback: If after 30 seconds no fresh reading has been found,
-    // start the run with the latest reading regardless.
+    // Fallback: If after 30 seconds no good fix is found, use the latest reading.
     Timer(const Duration(seconds: 30), () {
-      if (!isTracking && currentLocation != null) {
-        _startRunSubscription?.cancel();
+      if (!_hasGoodFix && currentLocation != null) {
+        _fixSubscription?.cancel();
+        _hasGoodFix = true;
         startRun(currentLocation!);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Fallback: Run started with accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m',
-            ),
+                'Fallback: using current accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)}m'),
             duration: const Duration(seconds: 2),
           ),
         );
+        setState(() {});
       }
     });
   }
@@ -167,12 +163,43 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
 
   @override
   void dispose() {
-    _startRunSubscription?.cancel();
+    _fixSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // If we haven't gotten a good fix, show the loading screen.
+    if (!_hasGoodFix) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Acquiring GPS Signal')),
+        body: Container(
+          color: Colors.black,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: Colors.green),
+                const SizedBox(height: 20),
+                Text(
+                  _loadingDebug,
+                  style: const TextStyle(color: Colors.white, fontSize: 18),
+                ),
+                const SizedBox(height: 10),
+                if (currentLocation != null)
+                  Text(
+                    'Lat: ${currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${currentLocation!.longitude.toStringAsFixed(6)}',
+                    style: const TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Once we have a good fix, show the main map page and run metrics.
     final distanceKm = distanceCovered / 1000;
     return Scaffold(
       appBar: AppBar(title: const Text('Active Run')),
@@ -213,6 +240,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
                 ),
               ),
             ),
+          // You can also add a button to manually retry if needed.
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
