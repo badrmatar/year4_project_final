@@ -1,4 +1,4 @@
-// lib/pages/active_run_page.dart (partial update)
+// lib/pages/active_run_page.dart (full version with updates)
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io'; // Added for Platform checks
@@ -123,7 +123,7 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       }
     }
 
-    // Start continuous location listening until we get an acceptable accuracy
+    // Start continuous location listening UNTIL good accuracy is found (no time limit)
     _startLocationSamplingUntilGoodAccuracy();
   }
 
@@ -139,6 +139,8 @@ class ActiveRunPageState extends State<ActiveRunPage> with RunTrackingMixin {
       distanceFilter: 0,
       activityType: ActivityType.fitness,
       pauseLocationUpdatesAutomatically: false,
+      allowBackgroundLocationUpdates: true,
+      showBackgroundLocationIndicator: true,
     )
         : AndroidSettings(
       accuracy: LocationAccuracy.high,
