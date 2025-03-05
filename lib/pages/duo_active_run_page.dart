@@ -1,17 +1,17 @@
-// lib/pages/duo_active_run_page.dart
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/user.dart';
 import '../mixins/run_tracking_mixin.dart';
+import '../services/ios_location_bridge.dart';
 
 class DuoActiveRunPage extends StatefulWidget {
   final int challengeId;
@@ -29,20 +29,54 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   Position? _partnerLocation;
   double _partnerDistance = 0.0;
   Timer? _partnerPollingTimer;
-  static const double MAX_ALLOWED_DISTANCE = 5000; // in meters
+  StreamSubscription? _iosLocationSubscription;
+
+  // Maximum allowed distance between partners in meters
+  static const double MAX_ALLOWED_DISTANCE = 500;
 
   // Duo run status variables:
   bool _hasEnded = false;
   bool _isRunning = true;
   bool _isInitializing = true;
 
+  // Create markers for self and partner
+  final Map<MarkerId, Marker> _markers = {};
+
   final supabase = Supabase.instance.client;
+
+  // iOS bridge for background location
+  final IOSLocationBridge _iosBridge = IOSLocationBridge();
 
   @override
   void initState() {
     super.initState();
+
+    // Initialize iOS location bridge if on iOS
+    if (Platform.isIOS) {
+      _initializeIOSLocationBridge();
+    }
+
     _initializeRun();
     _startPartnerPolling();
+  }
+
+  Future<void> _initializeIOSLocationBridge() async {
+    await _iosBridge.initialize();
+    await _iosBridge.startBackgroundLocationUpdates();
+
+    _iosLocationSubscription = _iosBridge.locationStream.listen((position) {
+      if (!mounted || _hasEnded) return;
+
+      if (currentLocation == null ||
+          position.accuracy < currentLocation!.accuracy) {
+        setState(() {
+          currentLocation = position;
+        });
+
+        _updateDuoWaitingRoom(position);
+        _addSelfMarker(position);
+      }
+    });
   }
 
   void _startPartnerPolling() {
@@ -64,6 +98,55 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     if (distance < 400) return "300+";
     if (distance < 500) return "400+";
     return "500+";
+  }
+
+  void _addSelfMarker(Position position) {
+    final markerId = const MarkerId('self');
+    final marker = Marker(
+      markerId: markerId,
+      position: LatLng(position.latitude, position.longitude),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      infoWindow: const InfoWindow(title: 'You'),
+    );
+
+    setState(() {
+      _markers[markerId] = marker;
+    });
+  }
+
+  void _addPartnerMarker(Position position) {
+    final markerId = const MarkerId('partner');
+    final marker = Marker(
+      markerId: markerId,
+      position: LatLng(position.latitude, position.longitude),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      infoWindow: const InfoWindow(title: 'Your Partner'),
+    );
+
+    setState(() {
+      _markers[markerId] = marker;
+    });
+  }
+
+  Future<void> _updateDuoWaitingRoom(Position position) async {
+    if (_hasEnded) return;
+
+    final user = Provider.of<UserModel>(context, listen: false);
+    try {
+      await supabase
+          .from('duo_waiting_room')
+          .update({
+        'current_latitude': position.latitude,
+        'current_longitude': position.longitude,
+        'last_update': DateTime.now().toIso8601String(),
+      })
+          .match({
+        'team_challenge_id': widget.challengeId,
+        'user_id': user.id,
+      });
+    } catch (e) {
+      debugPrint('Error updating duo waiting room: $e');
+    }
   }
 
   Future<void> _pollPartnerStatus() async {
@@ -92,20 +175,30 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           partnerLat.toDouble(),
           partnerLng.toDouble(),
         );
+
+        // Create a Position object for the partner
+        final partnerPosition = Position(
+          latitude: partnerLat.toDouble(),
+          longitude: partnerLng.toDouble(),
+          timestamp: DateTime.now(),
+          accuracy: 10.0,
+          altitude: 0.0,
+          heading: 0.0,
+          speed: 0.0,
+          speedAccuracy: 0.0,
+          floor: null,
+          altitudeAccuracy: 0.0,
+          headingAccuracy: 0.0,
+        );
+
+        // Add partner marker
+        _addPartnerMarker(partnerPosition);
+
         setState(() {
           _partnerDistance = calculatedDistance;
-          _partnerLocation = Position.fromMap({
-            'latitude': partnerLat.toDouble(),
-            'longitude': partnerLng.toDouble(),
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-            'accuracy': 0.0,
-            'altitude': 0.0,
-            'heading': 0.0,
-            'speed': 0.0,
-            'speedAccuracy': 0.0,
-            'altitudeAccuracy': 0.0,
-          });
+          _partnerLocation = partnerPosition;
         });
+
         if (calculatedDistance > MAX_ALLOWED_DISTANCE && !_hasEnded) {
           await supabase.from('duo_waiting_room').update({
             'has_ended': true,
@@ -131,6 +224,12 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       runTimer?.cancel();
       locationSubscription?.cancel();
       _partnerPollingTimer?.cancel();
+
+      // Stop iOS background location if needed
+      if (Platform.isIOS) {
+        _iosLocationSubscription?.cancel();
+        await _iosBridge.stopBackgroundLocationUpdates();
+      }
 
       await _saveRunData();
       await supabase.from('user_contributions').update({
@@ -166,9 +265,18 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           currentLocation = initialPosition;
           _isInitializing = false;
         });
-        startRun(initialPosition); // Using mixin's method
+
+        // Add self marker
+        _addSelfMarker(initialPosition);
+
+        // Update location in waiting room
+        _updateDuoWaitingRoom(initialPosition);
+
+        // Start tracking using the mixin
+        startRun(initialPosition);
       }
-      // Fallback timer
+
+      // Fallback timer if initialization takes too long
       Timer(const Duration(seconds: 30), () {
         if (_isInitializing && mounted && currentLocation != null) {
           setState(() {
@@ -189,6 +297,13 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     runTimer?.cancel();
     locationSubscription?.cancel();
     _partnerPollingTimer?.cancel();
+
+    // Stop iOS background location if needed
+    if (Platform.isIOS) {
+      _iosLocationSubscription?.cancel();
+      await _iosBridge.stopBackgroundLocationUpdates();
+    }
+
     final user = Provider.of<UserModel>(context, listen: false);
     try {
       await _saveRunData();
@@ -208,7 +323,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           builder: (context) {
             return AlertDialog(
               title: const Text('Run Ended'),
-              content: const Text('Distance between teammates exceeded 500m. The run has ended.'),
+              content: const Text(
+                  'Distance between teammates exceeded 500m. The run has ended.'),
               actions: [
                 TextButton(
                   onPressed: () {
@@ -227,7 +343,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       debugPrint('Error handling max distance exceeded: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Error ending run due to max distance.")),
+          const SnackBar(
+              content: Text("Error ending run due to max distance.")),
         );
       }
     }
@@ -242,6 +359,13 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       runTimer?.cancel();
       locationSubscription?.cancel();
       _partnerPollingTimer?.cancel();
+
+      // Stop iOS background location if needed
+      if (Platform.isIOS) {
+        _iosLocationSubscription?.cancel();
+        await _iosBridge.stopBackgroundLocationUpdates();
+      }
+
       await _saveRunData();
       await Future.wait([
         supabase.from('user_contributions').update({
@@ -263,7 +387,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Run ended successfully. Your teammate will be notified."),
+            content: Text(
+                "Run ended successfully. Your teammate will be notified."),
             duration: Duration(seconds: 3),
           ),
         );
@@ -292,10 +417,17 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         return;
       }
       final distance = double.parse(distanceCovered.toStringAsFixed(2));
-      final startTime = (startLocation!.timestamp ?? DateTime.now()).toUtc().toIso8601String();
+      final startTime = (startLocation!.timestamp ??
+          DateTime.now().subtract(Duration(seconds: secondsElapsed)))
+          .toUtc()
+          .toIso8601String();
       final endTime = DateTime.now().toUtc().toIso8601String();
       final routeJson = routePoints
-          .map((point) => {'latitude': point.latitude, 'longitude': point.longitude})
+          .map((point) =>
+      {
+        'latitude': point.latitude,
+        'longitude': point.longitude
+      })
           .toList();
       final requestBody = jsonEncode({
         'user_id': user.id,
@@ -311,7 +443,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       });
 
       final response = await http.post(
-        Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
+        Uri.parse('${dotenv
+            .env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
@@ -332,11 +465,13 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
                   children: [
                     const Text(
                       '🎉 Challenge Completed! 🎉',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Team Total: ${data['total_distance_km'].toStringAsFixed(2)} km',
+                      'Team Total: ${data['total_distance_km'].toStringAsFixed(
+                          2)} km',
                       style: const TextStyle(fontSize: 14),
                     ),
                   ],
@@ -355,7 +490,9 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
                     const Text('Run saved successfully!'),
                     const SizedBox(height: 4),
                     Text(
-                      'Team Progress: ${data['total_distance_km'].toStringAsFixed(2)}/${data['required_distance_km']} km',
+                      'Team Progress: ${data['total_distance_km']
+                          .toStringAsFixed(
+                          2)}/${data['required_distance_km']} km',
                       style: const TextStyle(fontSize: 14),
                     ),
                   ],
@@ -392,6 +529,13 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     runTimer?.cancel();
     locationSubscription?.cancel();
     _partnerPollingTimer?.cancel();
+
+    // Clean up iOS resources
+    if (Platform.isIOS) {
+      _iosLocationSubscription?.cancel();
+      _iosBridge.dispose();
+    }
+
     mapController?.dispose();
     super.dispose();
   }
@@ -399,6 +543,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   @override
   Widget build(BuildContext context) {
     final distanceKm = distanceCovered / 1000;
+
     if (_isInitializing) {
       return Scaffold(
         body: Container(
@@ -423,7 +568,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
                   Padding(
                     padding: const EdgeInsets.only(top: 16.0),
                     child: Text(
-                      'Accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)} meters',
+                      'Accuracy: ${currentLocation!.accuracy.toStringAsFixed(
+                          1)} meters',
                       style: const TextStyle(color: Colors.white),
                     ),
                   ),
@@ -433,6 +579,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         ),
       );
     }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Duo Active Run'),
@@ -448,13 +595,15 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           GoogleMap(
             initialCameraPosition: CameraPosition(
               target: currentLocation != null
-                  ? LatLng(currentLocation!.latitude, currentLocation!.longitude)
+                  ? LatLng(
+                  currentLocation!.latitude, currentLocation!.longitude)
                   : const LatLng(37.4219999, -122.0840575),
               zoom: 15,
             ),
             myLocationEnabled: true,
             myLocationButtonEnabled: true,
             polylines: {routePolyline},
+            markers: Set<Marker>.of(_markers.values),
             onMapCreated: (controller) => mapController = controller,
           ),
           Positioned(
@@ -468,12 +617,14 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
                   children: [
                     Text(
                       'Time: ${_formatTime(secondsElapsed)}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Distance: ${distanceKm.toStringAsFixed(2)} km',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -521,7 +672,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
               child: ElevatedButton(
                 onPressed: _endRunManually,
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 12),
                 ),
                 child: const Text(
                   'End Run',

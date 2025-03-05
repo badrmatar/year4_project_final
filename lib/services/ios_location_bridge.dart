@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 
+/// A bridge class to communicate with native iOS code for background location tracking
 class IOSLocationBridge {
   static final IOSLocationBridge _instance = IOSLocationBridge._internal();
 
@@ -50,6 +51,7 @@ class IOSLocationBridge {
             heading: 0.0,
             speed: args['speed'],
             speedAccuracy: args['speedAccuracy'],
+            floor: null,
             altitudeAccuracy: 0.0,
             headingAccuracy: 0.0,
           );
@@ -90,6 +92,19 @@ class IOSLocationBridge {
     } on PlatformException catch (e) {
       _errorController.add('Error stopping background location: ${e.message}');
       return false;
+    }
+  }
+
+  // Check authorization status for location services
+  Future<String> checkAuthorizationStatus() async {
+    if (!Platform.isIOS) return 'notSupported';
+
+    try {
+      final result = await _channel.invokeMethod('checkAuthorizationStatus');
+      return result as String;
+    } on PlatformException catch (e) {
+      _errorController.add('Error checking authorization: ${e.message}');
+      return 'error';
     }
   }
 

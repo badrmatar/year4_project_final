@@ -1,4 +1,3 @@
-// lib/pages/duo_waiting_room.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -287,9 +286,8 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
     if (mounted) {
       await Navigator.pushReplacementNamed(
         context,
-        '/active_run',
+        '/duo_active_run',
         arguments: {
-          'journey_type': 'duo',
           'team_challenge_id': widget.teamChallengeId,
         },
       );
