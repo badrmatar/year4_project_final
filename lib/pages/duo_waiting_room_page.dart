@@ -30,6 +30,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
   bool _isInitializing = true;
   bool _hasJoinedWaitingRoom = false;
   static const double REQUIRED_PROXIMITY = 200; // in meters
+  static const double STARTING_PROXIMITY = 100; // in meters - distance required to start
 
   // Local flags for status
   bool _isReady = false;
@@ -216,7 +217,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
         }
       }
 
-      // Check if both users are ready and have fresh data
+      // Check if both users are ready and have fresh data and are within the required distance
       if (bothUsersPresent) {
         final allReady = rows.every((row) => row['is_ready'] == true);
         final allRecent = rows.every((row) {
@@ -224,8 +225,37 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
           return DateTime.now().difference(updatedAt).inSeconds < 10;
         });
 
-        if (allReady && allRecent) {
+        // Only proceed if users are close enough
+        final isCloseEnough = _teammateDistance != null && _teammateDistance! <= STARTING_PROXIMITY;
+
+        if (allReady && allRecent && isCloseEnough) {
           await _navigateToActiveRun();
+        } else if (allReady && allRecent && !isCloseEnough) {
+          // If they're ready but too far apart, reset ready status
+          await supabase
+              .from('duo_waiting_room')
+              .update({
+            'is_ready': false,
+            'last_update': DateTime.now().toIso8601String(),
+          })
+              .match({
+            'user_id': user.id,
+            'team_challenge_id': widget.teamChallengeId,
+          });
+
+          setState(() {
+            _isReady = false;
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("You moved too far from your teammate. Please get closer and try again."),
+                duration: Duration(seconds: 3),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -257,6 +287,18 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
 
   Future<void> _setReady() async {
     final user = Provider.of<UserModel>(context, listen: false);
+
+    // Double check we're within distance before setting ready
+    if (_teammateDistance == null || _teammateDistance! > STARTING_PROXIMITY) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You need to be within 100m of your teammate to start"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     try {
       await supabase
           .from('duo_waiting_room')
@@ -334,28 +376,49 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
                 const SizedBox(height: 20),
                 if (_hasTeammate) _buildTeammateInfo(),
                 const SizedBox(height: 40),
-                // Only show Ready button when teammate is present and user isn't ready
-                if (_hasTeammate && !_isReady)
-                  ElevatedButton(
-                    onPressed: _setReady,
-                    child: const Text('Ready'),
-                  )
-                else if (_isReady)
-                  const Text(
-                    'You are ready! Waiting for teammate...',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  )
-                else
-                  const Text(
-                    'Waiting for teammate to join...',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                // Build the appropriate widget based on conditions
+                _buildActionWidget(),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildActionWidget() {
+    if (_hasTeammate && !_isReady) {
+      if (_teammateDistance != null && _teammateDistance! <= STARTING_PROXIMITY) {
+        return ElevatedButton(
+          onPressed: _setReady,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Ready'),
+        );
+      } else {
+        return const Text(
+          'You need to be within 100m of your teammate to start',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.red,
+          ),
+        );
+      }
+    } else if (_isReady) {
+      return const Text(
+        'You are ready! Waiting for teammate...',
+        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      );
+    } else {
+      return const Text(
+        'Waiting for teammate to join...',
+        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      );
+    }
   }
 
   Widget _buildLoadingScreen() {
@@ -392,7 +455,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Make sure you are within ${REQUIRED_PROXIMITY}m of each other',
+              'Make sure you are within ${STARTING_PROXIMITY}m of each other to start',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600]),
             ),
@@ -405,12 +468,12 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
   Widget _buildTeammateInfo() {
     final teammateName = _teammateInfo?['users']?['name'] ?? 'Teammate';
     final distance = _teammateDistance?.toStringAsFixed(1) ?? '?';
-    final isInRange =
-        _teammateDistance != null && _teammateDistance! <= REQUIRED_PROXIMITY;
+    final isInProximity = _teammateDistance != null && _teammateDistance! <= STARTING_PROXIMITY; // 100 meters threshold
+    final isInRange = _teammateDistance != null && _teammateDistance! <= REQUIRED_PROXIMITY;
 
     return Card(
       elevation: 4,
-      color: isInRange ? Colors.green.shade50 : Colors.orange.shade50,
+      color: isInProximity ? Colors.green.shade50 : Colors.orange.shade50,
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -427,18 +490,39 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
             Text(
               'Distance: ${distance}m',
               style: TextStyle(
-                color: isInRange ? Colors.green : Colors.orange,
+                color: isInProximity ? Colors.green : Colors.orange,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              isInRange ? 'Ready to start soon...' : 'Getting closer...',
-              style: TextStyle(
-                color: isInRange ? Colors.green : Colors.orange,
+            if (isInProximity)
+              Text(
+                'Ready to start!',
+                style: TextStyle(
+                  color: Colors.green,
+                ),
+              )
+            else
+              Text(
+                'You are too far from your partner!',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
+            if (!isInProximity)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  'Please get closer (< 100m) to begin',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.red,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
