@@ -30,6 +30,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   double _partnerDistance = 0.0;
   Timer? _partnerPollingTimer;
   StreamSubscription? _iosLocationSubscription;
+  StreamSubscription<Position>? _customLocationSubscription;
 
   // Maximum allowed distance between partners in meters
   static const double MAX_ALLOWED_DISTANCE = 500;
@@ -76,6 +77,86 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         _updateDuoWaitingRoom(position);
         _addSelfMarker(position);
       }
+    });
+  }
+
+  void _setupCustomLocationHandling() {
+    // This ensures we're using the same location service as the mixin
+    // but with our own handler that explicitly updates distanceCovered
+    _customLocationSubscription = locationService.trackLocation().listen((position) {
+      if (!isTracking || _hasEnded) return;
+
+      final currentPoint = LatLng(position.latitude, position.longitude);
+
+      // If we have a previous location, calculate distance
+      if (lastRecordedLocation != null) {
+        // Calculate distance using the mixin's method
+        final segmentDistance = calculateDistance(
+            lastRecordedLocation!.latitude,
+            lastRecordedLocation!.longitude,
+            currentPoint.latitude,
+            currentPoint.longitude
+        );
+
+        // Handle auto-pause logic (from the mixin)
+        final speed = position.speed >= 0 ? position.speed : 0.0;
+        if (autoPaused) {
+          if (speed > resumeThreshold) {
+            setState(() {
+              autoPaused = false;
+              stillCounter = 0;
+            });
+          }
+        } else {
+          if (speed < pauseThreshold) {
+            stillCounter++;
+            if (stillCounter >= 5) {
+              setState(() => autoPaused = true);
+            }
+          } else {
+            stillCounter = 0;
+          }
+        }
+
+        // Update distance only if not paused
+        if (!autoPaused) {
+          setState(() {
+            // This is the critical line - directly update distanceCovered
+            distanceCovered += segmentDistance;
+
+            // Update last recorded location
+            lastRecordedLocation = currentPoint;
+          });
+        }
+      } else {
+        // First location - initialize lastRecordedLocation
+        setState(() {
+          lastRecordedLocation = currentPoint;
+        });
+      }
+
+      // Update route visualization
+      setState(() {
+        currentLocation = position;
+        routePoints.add(currentPoint);
+        routePolyline = Polyline(
+          polylineId: const PolylineId('route'),
+          color: Colors.orange,
+          width: 5,
+          points: routePoints,
+        );
+      });
+
+      // Update duo waiting room with new location
+      _updateDuoWaitingRoom(position);
+
+      // Add self marker
+      _addSelfMarker(position);
+
+      // Move camera to follow user
+      mapController?.animateCamera(
+          CameraUpdate.newLatLng(currentPoint)
+      );
     });
   }
 
@@ -223,6 +304,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       isTracking = false;
       runTimer?.cancel();
       locationSubscription?.cancel();
+      _customLocationSubscription?.cancel();
       _partnerPollingTimer?.cancel();
 
       // Stop iOS background location if needed
@@ -274,6 +356,9 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
 
         // Start tracking using the mixin
         startRun(initialPosition);
+
+        // Add custom location handling to properly update distance
+        _setupCustomLocationHandling();
       }
 
       // Fallback timer if initialization takes too long
@@ -283,6 +368,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
             _isInitializing = false;
           });
           startRun(currentLocation!);
+          _setupCustomLocationHandling();
         }
       });
     } catch (e) {
@@ -296,6 +382,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     _hasEnded = true;
     runTimer?.cancel();
     locationSubscription?.cancel();
+    _customLocationSubscription?.cancel();
     _partnerPollingTimer?.cancel();
 
     // Stop iOS background location if needed
@@ -358,6 +445,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       isTracking = false;
       runTimer?.cancel();
       locationSubscription?.cancel();
+      _customLocationSubscription?.cancel();
       _partnerPollingTimer?.cancel();
 
       // Stop iOS background location if needed
@@ -528,6 +616,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     _hasEnded = true;
     runTimer?.cancel();
     locationSubscription?.cancel();
+    _customLocationSubscription?.cancel();
     _partnerPollingTimer?.cancel();
 
     // Clean up iOS resources
