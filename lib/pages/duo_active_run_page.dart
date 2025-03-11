@@ -32,6 +32,15 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   StreamSubscription? _iosLocationSubscription;
   StreamSubscription<Position>? _customLocationSubscription;
 
+  // Partner route tracking
+  final List<LatLng> _partnerRoutePoints = [];
+  Polyline _partnerRoutePolyline = const Polyline(
+    polylineId: PolylineId('partner_route'),
+    color: Colors.green,
+    width: 5,
+    points: [],
+  );
+
   // Maximum allowed distance between partners in meters
   static const double MAX_ALLOWED_DISTANCE = 500;
 
@@ -40,7 +49,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   bool _isRunning = true;
   bool _isInitializing = true;
 
-  // Create circles for user and partner instead of markers
+  // Marker management - we'll use small circles instead of the default markers
   final Map<CircleId, Circle> _circles = {};
 
   final supabase = Supabase.instance.client;
@@ -182,19 +191,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   }
 
   void _addSelfCircle(Position position) {
-    final circleId = CircleId('self');
-    final circle = Circle(
-      circleId: circleId,
-      center: LatLng(position.latitude, position.longitude),
-      radius: 10, // 10 meters radius
-      fillColor: Colors.blue.withOpacity(0.7),
-      strokeColor: Colors.blue,
-      strokeWidth: 2,
-    );
-
-    setState(() {
-      _circles[circleId] = circle;
-    });
+    // We're not adding a custom circle for self anymore
+    // We'll rely on the default blue location dot from Google Maps
   }
 
   void _addPartnerCircle(Position position) {
@@ -202,14 +200,27 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     final circle = Circle(
       circleId: circleId,
       center: LatLng(position.latitude, position.longitude),
-      radius: 10, // 10 meters radius
-      fillColor: Colors.green.withOpacity(0.7),
-      strokeColor: Colors.green,
+      radius: 15, // Larger radius similar to the default Google Maps blue dot
+      fillColor: Colors.green.withOpacity(0.5), // Translucent green
+      strokeColor: Colors.white, // White border
       strokeWidth: 2,
     );
 
     setState(() {
       _circles[circleId] = circle;
+
+      // Add the partner's position to their route
+      final partnerPoint = LatLng(position.latitude, position.longitude);
+      if (_partnerRoutePoints.isEmpty ||
+          _partnerRoutePoints.last != partnerPoint) {
+        _partnerRoutePoints.add(partnerPoint);
+        _partnerRoutePolyline = Polyline(
+          polylineId: const PolylineId('partner_route'),
+          color: Colors.green,
+          width: 5,
+          points: _partnerRoutePoints,
+        );
+      }
     });
   }
 
@@ -515,12 +526,9 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           .toIso8601String();
       final endTime = DateTime.now().toUtc().toIso8601String();
       final routeJson = routePoints
-          .map((point) =>
-      {
-        'latitude': point.latitude,
-        'longitude': point.longitude
-      })
+          .map((point) => {'latitude': point.latitude, 'longitude': point.longitude})
           .toList();
+
       final requestBody = jsonEncode({
         'user_id': user.id,
         'start_time': startTime,
@@ -535,8 +543,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       });
 
       final response = await http.post(
-        Uri.parse('${dotenv
-            .env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
+        Uri.parse('${dotenv.env['SUPABASE_URL']}/functions/v1/create_user_contribution'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${dotenv.env['BEARER_TOKEN']}',
@@ -545,59 +552,10 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       );
 
       if (response.statusCode == 201 && mounted) {
-        final responseData = jsonDecode(response.body);
-        final data = responseData['data'];
-        if (data != null) {
-          if (data['challenge_completed'] == true) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '🎉 Challenge Completed! 🎉',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Team Total: ${data['total_distance_km'].toStringAsFixed(
-                          2)} km',
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                  ],
-                ),
-                duration: const Duration(seconds: 5),
-                backgroundColor: Colors.green,
-              ),
-            );
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Run saved successfully!'),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Team Progress: ${data['total_distance_km']
-                          .toStringAsFixed(
-                          2)}/${data['required_distance_km']} km',
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                  ],
-                ),
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          }
-        }
+        final data = jsonDecode(response.body);
+        // Handle success if needed
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Failed to save run: ${response.body}")),
-        );
+        throw Exception("Failed to save run: ${response.body}");
       }
     } catch (e) {
       if (mounted) {
@@ -693,9 +651,9 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
                   : const LatLng(37.4219999, -122.0840575),
               zoom: 16,
             ),
-            myLocationEnabled: true,
+            myLocationEnabled: true, // Keep default blue dot
             myLocationButtonEnabled: true,
-            polylines: {routePolyline},
+            polylines: {routePolyline, _partnerRoutePolyline}, // Add both polylines
             circles: Set<Circle>.of(_circles.values),
             onMapCreated: (controller) => mapController = controller,
           ),
