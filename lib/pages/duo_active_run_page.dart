@@ -12,8 +12,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user.dart';
 import '../mixins/run_tracking_mixin.dart';
 import '../services/ios_location_bridge.dart';
+import '../constants/app_constants.dart';
 
+/// A page that displays and tracks a duo run with two participants.
+///
+/// This page shows both the user's and their partner's location in real-time,
+/// tracks the distance between them, and ends the run if they exceed the
+/// maximum allowed distance.
 class DuoActiveRunPage extends StatefulWidget {
+  /// The challenge ID this duo run is associated with.
   final int challengeId;
 
   const DuoActiveRunPage({Key? key, required this.challengeId})
@@ -36,20 +43,17 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   final List<LatLng> _partnerRoutePoints = [];
   Polyline _partnerRoutePolyline = const Polyline(
     polylineId: PolylineId('partner_route'),
-    color: Colors.green,
+    color: AppConstants.partnerRouteColor,
     width: 5,
     points: [],
   );
-
-  // Maximum allowed distance between partners in meters
-  static const double MAX_ALLOWED_DISTANCE = 500;
 
   // Duo run status variables:
   bool _hasEnded = false;
   bool _isRunning = true;
   bool _isInitializing = true;
 
-  // Marker management - we'll use small circles instead of the default markers
+  // Create circles for user and partner instead of markers
   final Map<CircleId, Circle> _circles = {};
 
   final supabase = Supabase.instance.client;
@@ -70,6 +74,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     _startPartnerPolling();
   }
 
+  /// Initializes the iOS location bridge for background tracking.
   Future<void> _initializeIOSLocationBridge() async {
     await _iosBridge.initialize();
     await _iosBridge.startBackgroundLocationUpdates();
@@ -89,9 +94,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     });
   }
 
+  /// Sets up custom location handling for tracking distance.
   void _setupCustomLocationHandling() {
-    // This ensures we're using the same location service as the mixin
-    // but with our own handler that explicitly updates distanceCovered
     _customLocationSubscription = locationService.trackLocation().listen((position) {
       if (!isTracking || _hasEnded) return;
 
@@ -110,14 +114,14 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         // Handle auto-pause logic (from the mixin)
         final speed = position.speed >= 0 ? position.speed : 0.0;
         if (autoPaused) {
-          if (speed > resumeThreshold) {
+          if (speed > AppConstants.kResumeThreshold) {
             setState(() {
               autoPaused = false;
               stillCounter = 0;
             });
           }
         } else {
-          if (speed < pauseThreshold) {
+          if (speed < AppConstants.kPauseThreshold) {
             stillCounter++;
             if (stillCounter >= 5) {
               setState(() => autoPaused = true);
@@ -150,7 +154,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         routePoints.add(currentPoint);
         routePolyline = Polyline(
           polylineId: const PolylineId('route'),
-          color: Colors.orange,
+          color: AppConstants.selfRouteColor,
           width: 5,
           points: routePoints,
         );
@@ -159,9 +163,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       // Update duo waiting room with new location
       _updateDuoWaitingRoom(position);
 
-      // Add self circle
-      _addSelfCircle(position);
-
       // Move camera to follow user
       mapController?.animateCamera(
           CameraUpdate.newLatLng(currentPoint)
@@ -169,6 +170,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     });
   }
 
+  /// Starts polling for partner's status at regular intervals.
   void _startPartnerPolling() {
     _partnerPollingTimer?.cancel();
     _partnerPollingTimer =
@@ -181,6 +183,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         });
   }
 
+  /// Converts a numeric distance to a human-readable distance group.
   String _getDistanceGroup(double distance) {
     if (distance < 100) return "<100";
     if (distance < 200) return "100+";
@@ -190,11 +193,14 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     return "500+";
   }
 
+  /// Helper method to add or update the self circle on the map.
+  /// Not used since we're relying on the default Google Maps blue dot.
   void _addSelfCircle(Position position) {
     // We're not adding a custom circle for self anymore
     // We'll rely on the default blue location dot from Google Maps
   }
 
+  /// Adds or updates the partner's circle on the map and adds to their route.
   void _addPartnerCircle(Position position) {
     final circleId = CircleId('partner');
     final circle = Circle(
@@ -216,7 +222,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         _partnerRoutePoints.add(partnerPoint);
         _partnerRoutePolyline = Polyline(
           polylineId: const PolylineId('partner_route'),
-          color: Colors.green,
+          color: AppConstants.partnerRouteColor,
           width: 5,
           points: _partnerRoutePoints,
         );
@@ -224,6 +230,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     });
   }
 
+  /// Updates the user's location in the duo waiting room database.
   Future<void> _updateDuoWaitingRoom(Position position) async {
     if (_hasEnded) return;
 
@@ -245,6 +252,11 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     }
   }
 
+  /// Polls for the partner's current location and updates the UI.
+  ///
+  /// This method fetches the partner's location from the database,
+  /// updates their marker on the map, and checks if the maximum
+  /// distance between partners has been exceeded.
   Future<void> _pollPartnerStatus() async {
     if (currentLocation == null || !mounted) return;
     try {
@@ -295,7 +307,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           _partnerLocation = partnerPosition;
         });
 
-        if (calculatedDistance > MAX_ALLOWED_DISTANCE && !_hasEnded) {
+        if (calculatedDistance > AppConstants.kMaxAllowedDistance && !_hasEnded) {
           await supabase.from('duo_waiting_room').update({
             'has_ended': true,
           }).match({
@@ -307,53 +319,20 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         }
       }
     } catch (e) {
-      debugPrint('Error in partner polling: $e');
+      debugPrint('Error in partner polling: $e. Challenge ID: ${widget.challengeId}');
     }
   }
 
+  /// Ends the run when the partner has ended it.
   Future<void> _endRunDueToPartner() async {
-    if (_hasEnded) return;
-    final user = Provider.of<UserModel>(context, listen: false);
-    try {
-      _hasEnded = true;
-      isTracking = false;
-      runTimer?.cancel();
-      locationSubscription?.cancel();
-      _customLocationSubscription?.cancel();
-      _partnerPollingTimer?.cancel();
-
-      // Stop iOS background location if needed
-      if (Platform.isIOS) {
-        _iosLocationSubscription?.cancel();
-        await _iosBridge.stopBackgroundLocationUpdates();
-      }
-
-      await _saveRunData();
-      await supabase.from('user_contributions').update({
-        'active': false,
-      }).match({
-        'team_challenge_id': widget.challengeId,
-        'user_id': user.id,
-      });
-
-      if (mounted) {
-        setState(() {
-          _isRunning = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Your teammate has ended the run. Run completed."),
-            duration: Duration(seconds: 3),
-          ),
-        );
-        await Future.delayed(const Duration(seconds: 2));
-        Navigator.pushReplacementNamed(context, '/challenges');
-      }
-    } catch (e) {
-      debugPrint('Error ending run due to partner: $e');
-    }
+    await _endRun(
+      reason: 'partner_ended',
+      notifyPartner: false,
+      message: "Your teammate has ended the run. Run completed.",
+    );
   }
 
+  /// Initializes the run by getting the initial position and setting up tracking.
   Future<void> _initializeRun() async {
     try {
       final initialPosition = await locationService.getCurrentLocation();
@@ -362,9 +341,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           currentLocation = initialPosition;
           _isInitializing = false;
         });
-
-        // Add self circle
-        _addSelfCircle(initialPosition);
 
         // Update location in waiting room
         _updateDuoWaitingRoom(initialPosition);
@@ -391,115 +367,122 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     }
   }
 
+  /// Handles the case when maximum distance between partners is exceeded.
   Future<void> _handleMaxDistanceExceeded() async {
-    if (_hasEnded) return;
-    isTracking = false;
-    _hasEnded = true;
-    runTimer?.cancel();
-    locationSubscription?.cancel();
-    _customLocationSubscription?.cancel();
-    _partnerPollingTimer?.cancel();
+    await _endRun(
+      reason: 'max_distance_exceeded',
+      notifyPartner: false,
+      message: "Distance between teammates exceeded 500m. The run has ended.",
+    );
 
-    // Stop iOS background location if needed
-    if (Platform.isIOS) {
-      _iosLocationSubscription?.cancel();
-      await _iosBridge.stopBackgroundLocationUpdates();
-    }
-
-    final user = Provider.of<UserModel>(context, listen: false);
-    try {
-      await _saveRunData();
-      await supabase.from('user_contributions').update({
-        'active': false,
-      }).match({
-        'team_challenge_id': widget.challengeId,
-        'user_id': user.id,
-      });
-      if (mounted) {
-        setState(() {
-          _isRunning = false;
-        });
-        await showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) {
-            return AlertDialog(
-              title: const Text('Run Ended'),
-              content: const Text(
-                  'Distance between teammates exceeded 500m. The run has ended.'),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
-        await Future.delayed(const Duration(seconds: 2));
-        Navigator.pushReplacementNamed(context, '/challenges');
-      }
-    } catch (e) {
-      debugPrint('Error handling max distance exceeded: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Error ending run due to max distance.")),
-        );
-      }
+    if (mounted) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Run Ended'),
+            content: const Text(
+                'Distance between teammates exceeded 500m. The run has ended.'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 
+  /// Manually ends the run when the user presses the end button.
   Future<void> _endRunManually() async {
+    await _endRun(
+      reason: 'manual',
+      notifyPartner: true,
+      message: "Run ended successfully. Your teammate will be notified.",
+    );
+  }
+
+  /// Ends the run and saves all run data.
+  ///
+  /// This method handles the common logic for ending a run regardless
+  /// of the reason (manual end, partner ended, or maximum distance exceeded).
+  /// It cancels all subscriptions, saves the run data, and updates the UI.
+  ///
+  /// Parameters:
+  /// - reason: A string describing why the run ended (for logging)
+  /// - notifyPartner: Whether to notify the partner that the run has ended
+  /// - message: The message to show to the user
+  Future<void> _endRun({
+    required String reason,
+    bool notifyPartner = false,
+    String? message,
+  }) async {
     if (_hasEnded) return;
+
     final user = Provider.of<UserModel>(context, listen: false);
+
     try {
+      // Set flags
       _hasEnded = true;
       isTracking = false;
+
+      // Cancel all subscriptions and timers
       runTimer?.cancel();
       locationSubscription?.cancel();
       _customLocationSubscription?.cancel();
       _partnerPollingTimer?.cancel();
 
-      // Stop iOS background location if needed
+      // Clean up iOS resources if needed
       if (Platform.isIOS) {
         _iosLocationSubscription?.cancel();
         await _iosBridge.stopBackgroundLocationUpdates();
       }
 
+      // Save the run data
       await _saveRunData();
-      await Future.wait([
+
+      // Update database records
+      final updatePromises = [
         supabase.from('user_contributions').update({
           'active': false,
         }).match({
           'team_challenge_id': widget.challengeId,
           'user_id': user.id,
-        }),
-        supabase.from('duo_waiting_room').update({
-          'has_ended': true,
-        }).match({
-          'team_challenge_id': widget.challengeId,
-          'user_id': user.id,
-        }),
-      ]);
+        })
+      ];
+
+      if (notifyPartner) {
+        updatePromises.add(
+            supabase.from('duo_waiting_room').update({
+              'has_ended': true,
+            }).match({
+              'team_challenge_id': widget.challengeId,
+              'user_id': user.id,
+            })
+        );
+      }
+
+      await Future.wait(updatePromises);
+
+      // Notify user and navigate away
       if (mounted) {
-        setState(() {
-          _isRunning = false;
-        });
+        setState(() => _isRunning = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                "Run ended successfully. Your teammate will be notified."),
-            duration: Duration(seconds: 3),
+          SnackBar(
+            content: Text(message ?? "Run ended."),
+            duration: AppConstants.kDefaultSnackbarDuration,
           ),
         );
-        await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(AppConstants.kNavigationDelay);
         Navigator.pushReplacementNamed(context, '/challenges');
       }
     } catch (e) {
-      debugPrint('Error ending run: $e');
+      debugPrint('Error ending run ($reason): $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Error ending run. Please try again.")),
@@ -508,6 +491,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     }
   }
 
+  /// Saves the run data to the server.
   Future<void> _saveRunData() async {
     try {
       final user = Provider.of<UserModel>(context, listen: false);
@@ -519,6 +503,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         }
         return;
       }
+
       final distance = double.parse(distanceCovered.toStringAsFixed(2));
       final startTime = (startLocation!.timestamp ??
           DateTime.now().subtract(Duration(seconds: secondsElapsed)))
@@ -551,13 +536,11 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         body: requestBody,
       );
 
-      if (response.statusCode == 201 && mounted) {
-        final data = jsonDecode(response.body);
-        // Handle success if needed
-      } else if (mounted) {
+      if (response.statusCode != 201 && mounted) {
         throw Exception("Failed to save run: ${response.body}");
       }
     } catch (e) {
+      debugPrint('Error saving run data: $e. Challenge ID: ${widget.challengeId}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("An error occurred: ${e.toString()}")),
@@ -566,6 +549,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     }
   }
 
+  /// Formats seconds into a MM:SS string.
   String _formatTime(int seconds) {
     final minutes = seconds ~/ 60;
     final remainingSeconds = seconds % 60;
@@ -593,147 +577,179 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
 
   @override
   Widget build(BuildContext context) {
-    final distanceKm = distanceCovered / 1000;
-
     if (_isInitializing) {
-      return Scaffold(
-        body: Container(
-          color: Colors.black87,
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Waiting for GPS signal...',
-                  style: TextStyle(
-                    fontSize: 24,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                CircularProgressIndicator(
-                  color: currentLocation != null ? Colors.green : Colors.white,
-                ),
-                if (currentLocation != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16.0),
-                    child: Text(
-                      'Accuracy: ${currentLocation!.accuracy.toStringAsFixed(
-                          1)} meters',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
+      return _buildInitializingScreen();
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Duo Active Run'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.stop),
-            onPressed: _endRunManually,
-          ),
-        ],
-      ),
+      appBar: _buildAppBar(),
       body: Stack(
         children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: currentLocation != null
-                  ? LatLng(
-                  currentLocation!.latitude, currentLocation!.longitude)
-                  : const LatLng(37.4219999, -122.0840575),
-              zoom: 16,
-            ),
-            myLocationEnabled: true, // Keep default blue dot
-            myLocationButtonEnabled: true,
-            polylines: {routePolyline, _partnerRoutePolyline}, // Add both polylines
-            circles: Set<Circle>.of(_circles.values),
-            onMapCreated: (controller) => mapController = controller,
-          ),
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Card(
-              color: Colors.white.withOpacity(0.9),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  children: [
-                    Text(
-                      'Time: ${_formatTime(secondsElapsed)}',
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Distance: ${distanceKm.toStringAsFixed(2)} km',
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 20,
-            right: 20,
-            child: Card(
-              color: Colors.lightBlueAccent.withOpacity(0.9),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(
-                  'Partner Distance: ${_getDistanceGroup(_partnerDistance)} m',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (autoPaused)
-            Positioned(
-              top: 90,
-              left: 20,
-              child: Card(
-                color: Colors.redAccent.withOpacity(0.8),
-                child: const Padding(
-                  padding: EdgeInsets.all(8.0),
-                  child: Text(
-                    'Auto-Paused',
-                    style: TextStyle(fontSize: 16, color: Colors.white),
-                  ),
-                ),
-              ),
-            ),
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: ElevatedButton(
-                onPressed: _endRunManually,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 12),
-                ),
-                child: const Text(
-                  'End Run',
-                  style: TextStyle(fontSize: 18),
-                ),
-              ),
-            ),
-          ),
+          _buildMap(),
+          _buildRunMetricsCard(),
+          _buildPartnerDistanceCard(),
+          if (autoPaused) _buildAutoPausedIndicator(),
+          _buildEndRunButton(),
         ],
+      ),
+    );
+  }
+
+  /// Builds the loading screen shown while waiting for GPS.
+  Widget _buildInitializingScreen() {
+    return Scaffold(
+      body: Container(
+        color: Colors.black87,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text(
+                'Waiting for GPS signal...',
+                style: TextStyle(
+                  fontSize: 24,
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              CircularProgressIndicator(
+                color: currentLocation != null ? Colors.green : Colors.white,
+              ),
+              if (currentLocation != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16.0),
+                  child: Text(
+                    'Accuracy: ${currentLocation!.accuracy.toStringAsFixed(1)} meters',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds the app bar for the run page.
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: const Text('Duo Active Run'),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.stop),
+          onPressed: _endRunManually,
+        ),
+      ],
+    );
+  }
+
+  /// Builds the Google Map showing both runners.
+  Widget _buildMap() {
+    return GoogleMap(
+      initialCameraPosition: CameraPosition(
+        target: currentLocation != null
+            ? LatLng(currentLocation!.latitude, currentLocation!.longitude)
+            : const LatLng(37.4219999, -122.0840575),
+        zoom: 16,
+      ),
+      myLocationEnabled: true, // Show default blue dot
+      myLocationButtonEnabled: true,
+      polylines: {routePolyline, _partnerRoutePolyline},
+      circles: Set<Circle>.of(_circles.values),
+      onMapCreated: (controller) => mapController = controller,
+    );
+  }
+
+  /// Builds the card showing time and distance.
+  Widget _buildRunMetricsCard() {
+    final distanceKm = distanceCovered / 1000;
+
+    return Positioned(
+      top: AppConstants.kMapMarginTop,
+      left: AppConstants.kMapMarginSide,
+      child: Card(
+        color: Colors.white.withOpacity(0.9),
+        child: Padding(
+          padding: EdgeInsets.all(AppConstants.kCardPadding),
+          child: Column(
+            children: [
+              Text(
+                'Time: ${_formatTime(secondsElapsed)}',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Distance: ${distanceKm.toStringAsFixed(2)} km',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds the card showing distance to partner.
+  Widget _buildPartnerDistanceCard() {
+    return Positioned(
+      top: AppConstants.kMapMarginTop,
+      right: AppConstants.kMapMarginSide,
+      child: Card(
+        color: Colors.lightBlueAccent.withOpacity(0.9),
+        child: Padding(
+          padding: EdgeInsets.all(AppConstants.kCardPadding),
+          child: Text(
+            'Partner Distance: ${_getDistanceGroup(_partnerDistance)} m',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds the indicator shown when the run is auto-paused.
+  Widget _buildAutoPausedIndicator() {
+    return Positioned(
+      top: 90,
+      left: AppConstants.kMapMarginSide,
+      child: Card(
+        color: Colors.redAccent.withOpacity(0.8),
+        child: Padding(
+          padding: EdgeInsets.all(AppConstants.kCardPadding),
+          child: const Text(
+            'Auto-Paused',
+            style: TextStyle(fontSize: 16, color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds the button to end the run.
+  Widget _buildEndRunButton() {
+    return Positioned(
+      bottom: 20,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: ElevatedButton(
+          onPressed: _endRunManually,
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 24, vertical: 12),
+          ),
+          child: const Text(
+            'End Run',
+            style: TextStyle(fontSize: 18),
+          ),
+        ),
       ),
     );
   }
