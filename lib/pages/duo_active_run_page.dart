@@ -105,10 +105,10 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       if (lastRecordedLocation != null) {
         // Calculate distance using the mixin's method
         final segmentDistance = calculateDistance(
-            lastRecordedLocation!.latitude,
-            lastRecordedLocation!.longitude,
-            currentPoint.latitude,
-            currentPoint.longitude
+          lastRecordedLocation!.latitude,
+          lastRecordedLocation!.longitude,
+          currentPoint.latitude,
+          currentPoint.longitude,
         );
 
         // Handle auto-pause logic (from the mixin)
@@ -131,18 +131,15 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           }
         }
 
-        // Update distance only if not paused
-        if (!autoPaused) {
+        // Update distance only if not paused and segmentDistance > 17 meters
+        if (!autoPaused && segmentDistance > 17) {
           setState(() {
-            // This is the critical line - directly update distanceCovered
             distanceCovered += segmentDistance;
-
-            // Update last recorded location
             lastRecordedLocation = currentPoint;
           });
         }
       } else {
-        // First location - initialize lastRecordedLocation
+        // First location update: initialize lastRecordedLocation
         setState(() {
           lastRecordedLocation = currentPoint;
         });
@@ -164,11 +161,10 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       _updateDuoWaitingRoom(position);
 
       // Move camera to follow user
-      mapController?.animateCamera(
-          CameraUpdate.newLatLng(currentPoint)
-      );
+      mapController?.animateCamera(CameraUpdate.newLatLng(currentPoint));
     });
   }
+
 
   /// Starts polling for partner's status at regular intervals.
   void _startPartnerPolling() {

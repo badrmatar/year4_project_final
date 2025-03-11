@@ -122,12 +122,14 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     // Get current point
     final currentPoint = LatLng(position.latitude, position.longitude);
 
-    // Check if we have previous points
+    // Check if we have a previous recorded location
     if (_lastRecordedLocation != null) {
       // Calculate new segment distance
       final segmentDistance = _calculateDistance(
-          _lastRecordedLocation!.latitude, _lastRecordedLocation!.longitude,
-          currentPoint.latitude, currentPoint.longitude
+        _lastRecordedLocation!.latitude,
+        _lastRecordedLocation!.longitude,
+        currentPoint.latitude,
+        currentPoint.longitude,
       );
 
       // Adjust speed from position
@@ -136,15 +138,14 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       // Handle auto-pause/resume logic
       _handleAutoPauseLogic(speed);
 
-      // Add to total distance if not paused
-      if (!_autoPaused) {
+      // Only add to total distance if not paused AND segment distance exceeds 17 meters
+      if (!_autoPaused && segmentDistance > 17) {
         setState(() {
           _distanceCovered += segmentDistance;
           _currentSpeed = speed;
 
           // Update pace (min/km) if we have distance
           if (_distanceCovered > 0) {
-            // Convert from seconds/meter to minutes/km
             final paceSeconds = _secondsElapsed / (_distanceCovered / 1000);
             _averagePace = paceSeconds / 60;
           }
@@ -155,12 +156,11 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       }
     }
 
-    // Add point to route
+    // Add point to route and move camera
     _addRoutePoint(currentPoint);
-
-    // Move camera to follow user
     _animateToUser(position);
   }
+
 
   void _addRoutePoint(LatLng point) {
     setState(() {

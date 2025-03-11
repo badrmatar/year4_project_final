@@ -29,7 +29,6 @@ class _HistoryPageState extends State<HistoryPage> {
     try {
       final userModel = Provider.of<UserModel>(context, listen: false);
       final historyData = await _historyService.fetchHistoryData(userModel.id);
-
       setState(() {
         _historyData = historyData;
         _isLoading = false;
@@ -47,6 +46,10 @@ class _HistoryPageState extends State<HistoryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
+        ),
         title: const Text('Challenge History'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
@@ -104,7 +107,6 @@ class _HistoryPageState extends State<HistoryPage> {
         ),
       );
     }
-
     return ListView.builder(
       itemCount: teamChallenges.length,
       itemBuilder: (context, index) {
@@ -122,7 +124,6 @@ class _HistoryPageState extends State<HistoryPage> {
         ),
       );
     }
-
     return ListView.builder(
       itemCount: personalContributions.length,
       itemBuilder: (context, index) {
