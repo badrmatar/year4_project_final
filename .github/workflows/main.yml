@@ -1,0 +1,25 @@
+name: Flutter Tests
+
+on:
+  push:
+    branches: [ main, running-feature, ios ]
+  pull_request:
+    branches: [ main, running-feature, ios ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+          channel: 'stable'
+      
+      - name: Install dependencies
+        run: flutter pub get
+      
+      - name: Run tests
+        run: flutter test
