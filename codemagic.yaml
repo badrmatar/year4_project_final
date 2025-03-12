@@ -1,0 +1,93 @@
+workflows:
+  ios-workflow:
+    name: iOS Production Workflow
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.badrm.duorun
+      xcode: latest
+      cocoapods: default
+      flutter: stable
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+        - pattern: 'develop'
+          include: true
+    scripts:
+      - name: Set up Flutter
+        script: |
+          flutter clean
+          flutter pub get
+          flutter pub upgrade
+
+      - name: Prepare build
+        script: |
+          # Dynamically generate build number
+          BUILD_NUMBER=$(($(date +%y%m%d%H%M) + 100))
+          sed -i '' "s/version: .*+[0-9]*/version: 1.0.1+$BUILD_NUMBER/" pubspec.yaml
+
+      - name: Build iOS
+        script: |
+          flutter build ios --release
+          cd ios
+          pod install
+          xcodebuild clean archive \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/Runner.xcarchive
+
+      - name: Create IPA
+        script: |
+          xcodebuild -exportArchive \
+            -archivePath build/Runner.xcarchive \
+            -exportOptionsPlist /Users/builder/export_options.plist \
+            -exportPath build/ios/ipa
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - your_email@example.com
+      app_store_connect:
+        app_name: DuoRun
+        submit_to_testflight: true
+        beta_groups:
+          - External Testers
+
+  android-workflow:
+    name: Android Production Workflow
+    environment:
+      android_signing:
+        - keystore_reference
+      flutter: stable
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+        - pattern: 'develop'
+          include: true
+    scripts:
+      - name: Set up Flutter
+        script: |
+          flutter clean
+          flutter pub get
+          flutter pub upgrade
+
+      - name: Build APK
+        script: |
+          flutter build apk --release
+
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk

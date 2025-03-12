@@ -7,19 +7,19 @@ part of 'challenge.dart';
 // **************************************************************************
 
 Challenge _$ChallengeFromJson(Map<String, dynamic> json) => Challenge(
-      challengeId: (json['challengeId'] as num).toInt(),
-      startTime: DateTime.parse(json['startTime'] as String),
-      duration: (json['duration'] as num).toInt(),
-      earningPoints: (json['earningPoints'] as num).toInt(),
+      challengeId: (json['challenge_id'] as num).toInt(),
+      startTime: DateTime.parse(json['start_time'] as String),
+      duration: (json['duration'] as num?)?.toInt(),
+      earningPoints: (json['earning_points'] as num?)?.toInt(),
       difficulty: json['difficulty'] as String,
-      type: json['type'] as String,
+      length: (json['length'] as num?)?.toDouble(),
     );
 
 Map<String, dynamic> _$ChallengeToJson(Challenge instance) => <String, dynamic>{
-      'challengeId': instance.challengeId,
-      'startTime': instance.startTime.toIso8601String(),
+      'challenge_id': instance.challengeId,
+      'start_time': instance.startTime.toIso8601String(),
       'duration': instance.duration,
-      'earningPoints': instance.earningPoints,
+      'earning_points': instance.earningPoints,
       'difficulty': instance.difficulty,
-      'type': instance.type,
+      'length': instance.length,
     };

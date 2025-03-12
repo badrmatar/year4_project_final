@@ -1,7 +1,4 @@
-// lib/pages/login_page.dart
-
 import 'package:flutter/material.dart';
-import 'package:year4_project/pages/home_page.dart';
 import '../services/auth_service.dart';
 
 class LoginPage extends StatefulWidget {
@@ -19,20 +16,12 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
 
   Future<void> _handleLogin() async {
-
     if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
-
-      bool success = await _authService.userLogin(context, _email, _password);
-
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = true);
+      final success = await _authService.userLogin(context, _email, _password);
+      setState(() => _isLoading = false);
 
       if (success && mounted) {
-        // Replace the current route with home
         Navigator.pushReplacementNamed(context, '/home');
       } else {
         if (mounted) {
@@ -47,8 +36,12 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
-        title: const Text('Login'),
+        elevation: 0,
+        backgroundColor: const Color(0xFF1F1F1F),
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Login', style: TextStyle(color: Colors.white)),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -60,11 +53,20 @@ class _LoginPageState extends State<LoginPage> {
             children: [
               // Email Field
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Email'),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white70),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
                 keyboardType: TextInputType.emailAddress,
                 validator: (value) {
-                  if (value == null ||
-                      value.isEmpty) {
+                  if (value == null || value.isEmpty || !value.contains('@')) {
                     return 'Please enter a valid email';
                   }
                   return null;
@@ -76,10 +78,20 @@ class _LoginPageState extends State<LoginPage> {
               const SizedBox(height: 16.0),
               // Password Field
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Password'),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white70),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
                 obscureText: true,
                 validator: (value) {
-                  if (value == null || value.length < 0) {
+                  if (value == null || value.length < 6) {
                     return 'Password must be at least 6 characters';
                   }
                   return null;
@@ -89,24 +101,22 @@ class _LoginPageState extends State<LoginPage> {
                 },
               ),
               const SizedBox(height: 32.0),
-              // Login Button
               ElevatedButton(
                 onPressed: _handleLogin,
                 child: const Text('Login'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
               ),
               const SizedBox(height: 32.0),
-
-
               TextButton(
-
                 onPressed: () {
-
-                  Navigator.pushNamed(context, '/signup');
-
+                  Navigator.pushReplacementNamed(context, '/signup');
                 },
-
-                child: const Text('Don\'t have an account? Sign up'),
-
+                child: const Text(
+                  "Don't have an account? Sign up",
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),

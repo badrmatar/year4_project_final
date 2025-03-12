@@ -30,14 +30,15 @@ class _SignUpPageState extends State<SignUpPage> {
         _isLoading = true;
       });
 
-      bool success = await _authService.registerUser(context, _username, _email, _password);
+      bool success =
+      await _authService.registerUser(context, _username, _email, _password);
 
       setState(() {
         _isLoading = false;
       });
 
       if (success && mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        Navigator.pushReplacementNamed(context, '/login');
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -51,8 +52,18 @@ class _SignUpPageState extends State<SignUpPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF1F1F1F),
       appBar: AppBar(
-        title: const Text('Sign Up'),
+        elevation: 0,
+        backgroundColor: const Color(0xFF1F1F1F),
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Sign Up', style: TextStyle(color: Colors.white)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pushReplacementNamed(context, '/login');
+          },
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -62,8 +73,19 @@ class _SignUpPageState extends State<SignUpPage> {
           key: _formKey,
           child: Column(
             children: [
+              // Name Field
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Name'),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Name',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white70),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
                 keyboardType: TextInputType.name,
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -75,8 +97,19 @@ class _SignUpPageState extends State<SignUpPage> {
                   _username = value.trim();
                 },
               ),
+              // Email Field
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Email'),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white70),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
                 keyboardType: TextInputType.emailAddress,
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -92,8 +125,19 @@ class _SignUpPageState extends State<SignUpPage> {
                 },
               ),
               const SizedBox(height: 16.0),
+              // Password Field
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Password'),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white70),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
                 obscureText: true,
                 validator: (value) {
                   if (value == null || value.length < 6) {
@@ -106,9 +150,19 @@ class _SignUpPageState extends State<SignUpPage> {
                 },
               ),
               const SizedBox(height: 16.0),
+              // Confirm Password Field
               TextFormField(
+                style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                    labelText: 'Confirm Password'),
+                  labelText: 'Confirm Password',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white70),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
                 obscureText: true,
                 validator: (value) {
                   if (value == null || value.length < 6) {
@@ -124,16 +178,24 @@ class _SignUpPageState extends State<SignUpPage> {
                 },
               ),
               const SizedBox(height: 32.0),
+              // Sign Up Button
               ElevatedButton(
                 onPressed: _handleSignUp,
                 child: const Text('Sign Up'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
               ),
               const SizedBox(height: 16.0),
+              // Link to Login Page
               TextButton(
                 onPressed: () {
-                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/login');
                 },
-                child: const Text('Already have an account? Login'),
+                child: const Text(
+                  'Already have an account? Login',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),
