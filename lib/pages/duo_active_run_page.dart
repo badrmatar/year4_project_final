@@ -15,7 +15,6 @@ import '../services/ios_location_bridge.dart';
 import '../constants/app_constants.dart';
 
 /// A page that displays and tracks a duo run with two participants.
-///
 class DuoActiveRunPage extends StatefulWidget {
   /// The challenge ID this duo run is associated with.
   final int challengeId;
@@ -31,7 +30,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     with RunTrackingMixin {
   // Duo-specific partner tracking variables:
   Position? _partnerLocation;
-  double _partnerDistance = 0.0;
+  double _partnerDistance = 0.0; // (Previously used for partner traveled distance)
+  double _gapDistance = 0.0; // New variable: distance gap between user and partner
   Timer? _partnerPollingTimer;
   StreamSubscription? _iosLocationSubscription;
   StreamSubscription<Position>? _customLocationSubscription;
@@ -216,7 +216,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     final circle = Circle(
       circleId: circleId,
       center: LatLng(position.latitude, position.longitude),
-      radius: 15, // Larger radius similar to the default Google Maps blue dot
+      radius: 15, // Similar to the default Google Maps blue dot
       fillColor: Colors.green.withOpacity(0.5),
       strokeColor: Colors.white,
       strokeWidth: 2,
@@ -227,8 +227,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
 
       // Add the partner's position to their route
       final partnerPoint = LatLng(position.latitude, position.longitude);
-      if (_partnerRoutePoints.isEmpty ||
-          _partnerRoutePoints.last != partnerPoint) {
+      if (_partnerRoutePoints.isEmpty || _partnerRoutePoints.last != partnerPoint) {
         _partnerRoutePoints.add(partnerPoint);
         _partnerRoutePolyline = Polyline(
           polylineId: const PolylineId('partner_route'),
@@ -301,7 +300,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           headingAccuracy: 0.0,
         );
 
-        // Check gap distance between current user and partner
+        // Calculate the gap distance between current user and partner
         final gapDistance = Geolocator.distanceBetween(
           currentLocation!.latitude,
           currentLocation!.longitude,
@@ -309,7 +308,12 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           partnerPosition.longitude,
         );
 
-        // Using 300 meters as the maximum allowed distance
+        // Update the gap distance state to display in the UI
+        setState(() {
+          _gapDistance = gapDistance;
+        });
+
+        // Using 300 meters as the maximum allowed gap distance
         if (gapDistance > 300.0 && !_hasEnded) {
           await supabase.from('duo_waiting_room').update({
             'has_ended': true,
@@ -321,7 +325,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           return;
         }
 
-        // Calculate partner's traveled distance incrementally.
+        // Calculate partner's traveled distance incrementally (if needed for other purposes)
         if (_lastPartnerLocation != null) {
           final segmentDistance = Geolocator.distanceBetween(
             _lastPartnerLocation!.latitude,
@@ -692,7 +696,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     );
   }
 
-  /// Builds the bottom stats panel similar to the solo run page.
+  /// Builds the bottom stats panel.
   Widget _buildBottomStatsPanel() {
     final distanceKm = distanceCovered / 1000;
 
@@ -737,13 +741,13 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
                 ),
               ),
 
-            // Stats row - includes partner distance
+            // Stats row - now shows the gap distance (distance between teammates)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildStatItem('DISTANCE', '${distanceKm.toStringAsFixed(2)} km'),
                 _buildStatItem('TIME', _formatTime(secondsElapsed)),
-                _buildStatItem('PARTNER', '${_getDistanceGroup(_partnerDistance)} m'),
+                _buildStatItem('PARTNER', '${_getDistanceGroup(_gapDistance)} m'),
               ],
             ),
 
