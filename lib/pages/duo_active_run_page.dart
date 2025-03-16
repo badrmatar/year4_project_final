@@ -206,10 +206,10 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   String _getDistanceGroup(double distance) {
     if (distance < 100) return "<100";
     if (distance < 200) return "100+";
-    if (distance < 300) return "200+";
-    if (distance < 400) return "300+";
-    if (distance < 500) return "400+";
-    return "500+";
+    if (distance < 250) return "200+";
+    if (distance < 280) return "250+";
+    if (distance < 300) return "280+";
+    return "300+";
   }
 
   /// Adds or updates the partner's circle on the map and adds to their route.
@@ -319,7 +319,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           _partnerLocation = partnerPosition;
         });
 
-        if (calculatedDistance > AppConstants.kMaxAllowedDistance && !_hasEnded) {
+        // Using 300 meters as the maximum allowed distance
+        if (calculatedDistance > 300.0 && !_hasEnded) {
           await supabase.from('duo_waiting_room').update({
             'has_ended': true,
           }).match({
@@ -384,7 +385,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     await _endRun(
       reason: 'max_distance_exceeded',
       notifyPartner: false,
-      message: "Distance between teammates exceeded 500m. The run has ended.",
+      message: "Distance between teammates exceeded 300m. The run has ended.",
     );
 
     if (mounted) {
@@ -395,7 +396,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           return AlertDialog(
             title: const Text('Run Ended'),
             content: const Text(
-                'Distance between teammates exceeded 500m. The run has ended.'),
+                'Distance between teammates exceeded 300m. The run has ended.'),
             actions: [
               TextButton(
                 onPressed: () {
@@ -644,6 +645,32 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Text('Duo Active Run'),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('End Run?'),
+              content: const Text('Are you sure you want to end your run?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _endRunManually();
+                  },
+                  child: const Text('End Run'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      automaticallyImplyLeading: false, // Don't add a back button automatically
     );
   }
 
