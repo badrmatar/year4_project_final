@@ -131,7 +131,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     });
   }
 
-  /// Sets up custom location handling for tracking distance.
+  /// Sets up custom location handling for tracking distance - used for Android.
   void _setupCustomLocationHandling() {
     _customLocationSubscription = locationService.trackLocation().listen((position) {
       if (!isTracking || _hasEnded) return;
@@ -182,18 +182,16 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     });
   }
 
-
   /// Starts polling for partner's status at regular intervals.
   void _startPartnerPolling() {
     _partnerPollingTimer?.cancel();
-    _partnerPollingTimer =
-        Timer.periodic(const Duration(seconds: 1), (timer) async {
-          if (!mounted || _hasEnded) {
-            timer.cancel();
-            return;
-          }
-          await _pollPartnerStatus();
-        });
+    _partnerPollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (!mounted || _hasEnded) {
+        timer.cancel();
+        return;
+      }
+      await _pollPartnerStatus();
+    });
   }
 
   /// Converts a numeric distance to a human-readable distance group.
@@ -352,14 +350,26 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         // Update location in waiting room
         _updateDuoWaitingRoom(initialPosition);
 
-        // Platform-specific location tracking setup
+        // Start the run timer
+        runTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (!autoPaused && mounted) {
+            setState(() => secondsElapsed++);
+          }
+        });
+
+        // Set the initial position and lastRecordedLocation
+        setState(() {
+          startLocation = initialPosition;
+          lastRecordedLocation = LatLng(initialPosition.latitude, initialPosition.longitude);
+          isTracking = true;
+        });
+
+        // Use platform-specific location tracking
         if (Platform.isIOS) {
-          // Only use iOS bridge for iOS
+          // iOS uses the native bridge
           await _initializeIOSLocationBridge();
         } else {
-          // Start tracking using the mixin for Android
-          startRun(initialPosition);
-          // Use custom location handling for Android
+          // Android uses the custom location handling
           _setupCustomLocationHandling();
         }
       }
@@ -371,10 +381,19 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
             _isInitializing = false;
           });
 
-          if (Platform.isIOS) {
-            // We're already using iOS bridge
-          } else {
-            startRun(currentLocation!);
+          // Set up tracking if it hasn't been done yet
+          if (!isTracking) {
+            setState(() {
+              startLocation = currentLocation;
+              lastRecordedLocation = LatLng(currentLocation!.latitude, currentLocation!.longitude);
+              isTracking = true;
+            });
+
+            if (Platform.isIOS) {
+              _initializeIOSLocationBridge();
+            } else {
+              _setupCustomLocationHandling();
+            }
           }
         }
       });
@@ -679,8 +698,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
 
   /// Builds the Google Map showing both runners.
   Widget _buildMap() {
-    Set<Polyline> polylines = {routePolyline, _partnerRoutePolyline};
-
     return GoogleMap(
       initialCameraPosition: CameraPosition(
         target: currentLocation != null
@@ -690,7 +707,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       ),
       myLocationEnabled: true, // Show default blue dot
       myLocationButtonEnabled: true,
-      polylines: polylines,
+      polylines: {routePolyline, _partnerRoutePolyline},
       circles: Set<Circle>.of(_circles.values),
       onMapCreated: (controller) => mapController = controller,
     );
