@@ -82,15 +82,58 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     _iosLocationSubscription = _iosBridge.locationStream.listen((position) {
       if (!mounted || _hasEnded) return;
 
-      if (currentLocation == null ||
-          position.accuracy < currentLocation!.accuracy) {
+      print("iOS location update received: ${position.latitude}, ${position.longitude}, accuracy: ${position.accuracy}");
+
+      // Update current location if better accuracy or first update
+      if (currentLocation == null || position.accuracy < currentLocation!.accuracy) {
         setState(() {
           currentLocation = position;
         });
 
+        // Update the partner tracking system
         _updateDuoWaitingRoom(position);
-        _addSelfCircle(position);
+
+        // IMPORTANT: Process the location for distance and route drawing
+        final currentPoint = LatLng(position.latitude, position.longitude);
+
+        // Add to route points
+        setState(() {
+          routePoints.add(currentPoint);
+          routePolyline = Polyline(
+            polylineId: const PolylineId('route'),
+            color: AppConstants.selfRouteColor,
+            width: 5,
+            points: routePoints,
+          );
+        });
+
+        // Calculate distance if we have a previous point
+        if (lastRecordedLocation != null) {
+          final segmentDistance = calculateDistance(
+            lastRecordedLocation!.latitude,
+            lastRecordedLocation!.longitude,
+            currentPoint.latitude,
+            currentPoint.longitude,
+          );
+
+          // Only add distance if segment is greater than 15 meters
+          if (segmentDistance > 15.0) {
+            print("iOS: Adding distance segment: $segmentDistance meters");
+            setState(() {
+              distanceCovered += segmentDistance;
+              lastRecordedLocation = currentPoint;
+            });
+          }
+        } else {
+          // First point
+          lastRecordedLocation = currentPoint;
+        }
+
+        // Move map camera
+        mapController?.animateCamera(CameraUpdate.newLatLng(currentPoint));
       }
+    }, onError: (error) {
+      print("iOS location bridge error: $error");
     });
   }
 
@@ -132,7 +175,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         }
 
         // Update distance only if not paused and segmentDistance > 17 meters
-        if (!autoPaused && segmentDistance > 17) {
+        if (!autoPaused && segmentDistance > 15) {
           setState(() {
             distanceCovered += segmentDistance;
             lastRecordedLocation = currentPoint;

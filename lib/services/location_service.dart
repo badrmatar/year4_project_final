@@ -49,7 +49,7 @@ class LocationService {
     if (Platform.isIOS) {
       return AppleSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 5,
+        distanceFilter: 15,
         activityType: ActivityType.fitness,
         pauseLocationUpdatesAutomatically: false,
         allowBackgroundLocationUpdates: true,
@@ -58,7 +58,7 @@ class LocationService {
     } else {
       return AndroidSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 5,
+        distanceFilter: 15,
         forceLocationManager: false,
         intervalDuration: const Duration(seconds: 1),
       );

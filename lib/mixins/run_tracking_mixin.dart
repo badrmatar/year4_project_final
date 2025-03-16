@@ -73,7 +73,7 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
           position.latitude,
           position.longitude,
         );
-        if (newDistance > 20.0) {
+        if (newDistance > 15.0) {
           setState(() {
             distanceCovered += newDistance;
             lastRecordedLocation = LatLng(position.latitude, position.longitude);
