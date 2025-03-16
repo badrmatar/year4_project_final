@@ -63,7 +63,7 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
 
       // Update auto-pause logic.
       final speed = position.speed.clamp(0.0, double.infinity);
-      _handleAutoPauseLogic(speed);
+
 
       // Calculate distance if not auto-paused.
       if (lastRecordedLocation != null && !autoPaused) {
@@ -117,25 +117,7 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
   }
 
   /// Auto-pause logic based on speed.
-  void _handleAutoPauseLogic(double speed) {
-    if (autoPaused) {
-      if (speed > resumeThreshold) {
-        setState(() {
-          autoPaused = false;
-          stillCounter = 0;
-        });
-      }
-    } else {
-      if (speed < pauseThreshold) {
-        stillCounter++;
-        if (stillCounter >= 5) {
-          setState(() => autoPaused = true);
-        }
-      } else {
-        stillCounter = 0;
-      }
-    }
-  }
+
 
   @override
   void dispose() {

@@ -41,8 +41,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
   int _secondsElapsed = 0;
   double _distanceCovered = 0.0;
   double _currentSpeed = 0.0;
-  double _averagePace = 0.0;  // minutes per km
-  int _caloriesBurned = 0;
 
   // Path variables
   List<LatLng> _routePoints = [];
@@ -83,10 +81,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       if (!_autoPaused && !_manuallyPaused && mounted) {
         setState(() {
           _secondsElapsed++;
-          // Update calories every 10 seconds (simple estimation)
-          if (_secondsElapsed % 10 == 0) {
-            _updateCaloriesBurned();
-          }
         });
       }
     });
@@ -136,19 +130,12 @@ class ActiveRunPageState extends State<ActiveRunPage> {
       final speed = position.speed >= 0 ? position.speed : 0.0;
 
       // Handle auto-pause/resume logic
-      _handleAutoPauseLogic(speed);
 
       // Only add to total distance if not paused AND segment distance exceeds 17 meters
-      if (!_autoPaused && segmentDistance > 17) {
+      if (segmentDistance > 15) {
         setState(() {
           _distanceCovered += segmentDistance;
           _currentSpeed = speed;
-
-          // Update pace (min/km) if we have distance
-          if (_distanceCovered > 0) {
-            final paceSeconds = _secondsElapsed / (_distanceCovered / 1000);
-            _averagePace = paceSeconds / 60;
-          }
 
           // Update last recorded location
           _lastRecordedLocation = currentPoint;
@@ -183,31 +170,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     );
   }
 
-  void _handleAutoPauseLogic(double speed) {
-    if (_manuallyPaused) return;
-
-    if (_autoPaused) {
-      // Currently paused - check if we should resume
-      if (speed > _resumeThreshold) {
-        setState(() {
-          _autoPaused = false;
-          _stillCount = 0;
-        });
-      }
-    } else {
-      // Currently running - check if we should pause
-      if (speed < _pauseThreshold) {
-        _stillCount++;
-        if (_stillCount >= 5) {  // 5 consecutive low-speed readings
-          setState(() {
-            _autoPaused = true;
-          });
-        }
-      } else {
-        _stillCount = 0;
-      }
-    }
-  }
 
   double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371000.0; // meters
@@ -225,18 +187,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
 
   double _degreesToRadians(double degrees) {
     return degrees * (pi / 180.0);
-  }
-
-  void _updateCaloriesBurned() {
-    // Very simple calories burned estimation
-    // Assumes 60 calories per km on average
-    // This could be improved with user weight, pace, etc.
-    final distanceKm = _distanceCovered / 1000;
-    final calories = (distanceKm * 60).round();
-
-    setState(() {
-      _caloriesBurned = calories;
-    });
   }
 
   void _togglePause() {
@@ -351,8 +301,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
           _runSummary = {
             'distanceKm': distance / 1000,
             'durationSeconds': _secondsElapsed,
-            'averagePaceMinPerKm': _averagePace,
-            'caloriesBurned': _caloriesBurned,
             'completed': data['data']['challenge_completed'] ?? false,
             'teamProgress': data['data']['total_distance_km'] ?? 0,
             'requiredDistance': data['data']['required_distance_km'] ?? 0,
@@ -377,11 +325,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
     final durationText = hours > 0
         ? '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}'
         : '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-
-    // Format pace
-    final paceMinutes = _averagePace.floor();
-    final paceSeconds = ((_averagePace - paceMinutes) * 60).round();
-    final paceText = '$paceMinutes:${paceSeconds.toString().padLeft(2, '0')} min/km';
 
     // Format distance
     final distanceText = '${(_runSummary!['distanceKm'] as double).toStringAsFixed(2)} km';
@@ -483,8 +426,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
                         children: [
                           _buildStatCard('Distance', distanceText, Icons.straighten),
                           _buildStatCard('Duration', durationText, Icons.timer),
-                          _buildStatCard('Avg. Pace', paceText, Icons.speed),
-                          _buildStatCard('Calories', '${_caloriesBurned} kcal', Icons.local_fire_department),
                         ],
                       ),
 
@@ -736,9 +677,6 @@ class ActiveRunPageState extends State<ActiveRunPage> {
                     children: [
                       _buildStatItem('DISTANCE', '${distanceKm.toStringAsFixed(2)} km'),
                       _buildStatItem('TIME', _formatTime(_secondsElapsed)),
-                      _buildStatItem('PACE', _averagePace > 0
-                          ? '${_averagePace.floor()}:${((_averagePace - _averagePace.floor()) * 60).round().toString().padLeft(2, '0')}'
-                          : '--:--'),
                     ],
                   ),
 

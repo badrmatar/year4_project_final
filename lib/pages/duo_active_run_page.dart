@@ -154,28 +154,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           currentPoint.longitude,
         );
 
-        // Handle auto-pause logic (from the mixin)
-        final speed = position.speed >= 0 ? position.speed : 0.0;
-        if (autoPaused) {
-          if (speed > AppConstants.kResumeThreshold) {
-            setState(() {
-              autoPaused = false;
-              stillCounter = 0;
-            });
-          }
-        } else {
-          if (speed < AppConstants.kPauseThreshold) {
-            stillCounter++;
-            if (stillCounter >= 5) {
-              setState(() => autoPaused = true);
-            }
-          } else {
-            stillCounter = 0;
-          }
-        }
-
         // Update distance only if not paused and segmentDistance > 17 meters
-        if (!autoPaused && segmentDistance > 15) {
+        if (segmentDistance > 15) {
           setState(() {
             distanceCovered += segmentDistance;
             lastRecordedLocation = currentPoint;
@@ -230,13 +210,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     if (distance < 400) return "300+";
     if (distance < 500) return "400+";
     return "500+";
-  }
-
-  /// Helper method to add or update the self circle on the map.
-  /// Not used since we're relying on the default Google Maps blue dot.
-  void _addSelfCircle(Position position) {
-    // We're not adding a custom circle for self anymore
-    // We'll rely on the default blue location dot from Google Maps
   }
 
   /// Adds or updates the partner's circle on the map and adds to their route.
@@ -625,10 +598,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       body: Stack(
         children: [
           _buildMap(),
-          _buildRunMetricsCard(),
-          _buildPartnerDistanceCard(),
-          if (autoPaused) _buildAutoPausedIndicator(),
-          _buildEndRunButton(),
+          _buildBottomStatsPanel(),
         ],
       ),
     );
@@ -674,12 +644,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Text('Duo Active Run'),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.stop),
-          onPressed: _endRunManually,
-        ),
-      ],
     );
   }
 
@@ -700,96 +664,113 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     );
   }
 
-  /// Builds the card showing time and distance.
-  Widget _buildRunMetricsCard() {
+
+  /// Builds the bottom stats panel similar to the solo run page.
+  Widget _buildBottomStatsPanel() {
     final distanceKm = distanceCovered / 1000;
 
     return Positioned(
-      top: AppConstants.kMapMarginTop,
-      left: AppConstants.kMapMarginSide,
-      child: Card(
-        color: Colors.white.withOpacity(0.9),
-        child: Padding(
-          padding: EdgeInsets.all(AppConstants.kCardPadding),
-          child: Column(
-            children: [
-              Text(
-                'Time: ${_formatTime(secondsElapsed)}',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Distance: ${distanceKm.toStringAsFixed(2)} km',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Builds the card showing distance to partner.
-  Widget _buildPartnerDistanceCard() {
-    return Positioned(
-      top: AppConstants.kMapMarginTop,
-      right: AppConstants.kMapMarginSide,
-      child: Card(
-        color: Colors.lightBlueAccent.withOpacity(0.9),
-        child: Padding(
-          padding: EdgeInsets.all(AppConstants.kCardPadding),
-          child: Text(
-            'Partner Distance: ${_getDistanceGroup(_partnerDistance)} m',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Builds the indicator shown when the run is auto-paused.
-  Widget _buildAutoPausedIndicator() {
-    return Positioned(
-      top: 90,
-      left: AppConstants.kMapMarginSide,
-      child: Card(
-        color: Colors.redAccent.withOpacity(0.8),
-        child: Padding(
-          padding: EdgeInsets.all(AppConstants.kCardPadding),
-          child: const Text(
-            'Auto-Paused',
-            style: TextStyle(fontSize: 16, color: Colors.white),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Builds the button to end the run.
-  Widget _buildEndRunButton() {
-    return Positioned(
-      bottom: 20,
+      bottom: 0,
       left: 0,
       right: 0,
-      child: Center(
-        child: ElevatedButton(
-          onPressed: _endRunManually,
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 24, vertical: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
           ),
-          child: const Text(
-            'End Run',
-            style: TextStyle(fontSize: 18),
-          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Status indicators
+            if (autoPaused)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Text(
+                  'AUTO-PAUSED',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+
+            // Stats row - includes partner distance
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatItem('DISTANCE', '${distanceKm.toStringAsFixed(2)} km'),
+                _buildStatItem('TIME', _formatTime(secondsElapsed)),
+                _buildStatItem('PARTNER', '${_getDistanceGroup(_partnerDistance)} m'),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // End run button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _endRunManually,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                ),
+                child: const Text(
+                  'END RUN',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  /// Helper method to build a stat item with label and value.
+  Widget _buildStatItem(String label, String value) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 }
