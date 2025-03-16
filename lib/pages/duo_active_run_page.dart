@@ -16,9 +16,6 @@ import '../constants/app_constants.dart';
 
 /// A page that displays and tracks a duo run with two participants.
 ///
-/// This page shows both the user's and their partner's location in real-time,
-/// tracks the distance between them, and ends the run if they exceed the
-/// maximum allowed distance.
 class DuoActiveRunPage extends StatefulWidget {
   /// The challenge ID this duo run is associated with.
   final int challengeId;
@@ -38,6 +35,9 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   Timer? _partnerPollingTimer;
   StreamSubscription? _iosLocationSubscription;
   StreamSubscription<Position>? _customLocationSubscription;
+
+  // New variable to keep track of the partner's last location for incremental distance calculation.
+  Position? _lastPartnerLocation;
 
   // Partner route tracking
   final List<LatLng> _partnerRoutePoints = [];
@@ -64,6 +64,12 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   @override
   void initState() {
     super.initState();
+
+    // Initialize iOS location bridge if on iOS
+    if (Platform.isIOS) {
+      _initializeIOSLocationBridge();
+    }
+
     _initializeRun();
     _startPartnerPolling();
   }
@@ -87,7 +93,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         // Update the partner tracking system
         _updateDuoWaitingRoom(position);
 
-        // IMPORTANT: Process the location for distance and route drawing
+        // Process the location for distance and route drawing
         final currentPoint = LatLng(position.latitude, position.longitude);
 
         // Add to route points
@@ -131,7 +137,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
     });
   }
 
-  /// Sets up custom location handling for tracking distance - used for Android.
+  /// Sets up custom location handling for tracking distance.
   void _setupCustomLocationHandling() {
     _customLocationSubscription = locationService.trackLocation().listen((position) {
       if (!isTracking || _hasEnded) return;
@@ -140,7 +146,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
 
       // If we have a previous location, calculate distance
       if (lastRecordedLocation != null) {
-        // Calculate distance using the mixin's method
         final segmentDistance = calculateDistance(
           lastRecordedLocation!.latitude,
           lastRecordedLocation!.longitude,
@@ -185,13 +190,14 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   /// Starts polling for partner's status at regular intervals.
   void _startPartnerPolling() {
     _partnerPollingTimer?.cancel();
-    _partnerPollingTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted || _hasEnded) {
-        timer.cancel();
-        return;
-      }
-      await _pollPartnerStatus();
-    });
+    _partnerPollingTimer =
+        Timer.periodic(const Duration(seconds: 1), (timer) async {
+          if (!mounted || _hasEnded) {
+            timer.cancel();
+            return;
+          }
+          await _pollPartnerStatus();
+        });
   }
 
   /// Converts a numeric distance to a human-readable distance group.
@@ -211,8 +217,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       circleId: circleId,
       center: LatLng(position.latitude, position.longitude),
       radius: 15, // Larger radius similar to the default Google Maps blue dot
-      fillColor: Colors.green.withOpacity(0.5), // Translucent green
-      strokeColor: Colors.white, // White border
+      fillColor: Colors.green.withOpacity(0.5),
+      strokeColor: Colors.white,
       strokeWidth: 2,
     );
 
@@ -257,10 +263,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   }
 
   /// Polls for the partner's current location and updates the UI.
-  ///
-  /// This method fetches the partner's location from the database,
-  /// updates their marker on the map, and checks if the maximum
-  /// distance between partners has been exceeded.
   Future<void> _pollPartnerStatus() async {
     if (currentLocation == null || !mounted) return;
     try {
@@ -274,19 +276,15 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       if (!mounted) return;
       if (results is List && results.isNotEmpty) {
         final data = results.first as Map<String, dynamic>;
+
         // If partner ended run, end our run
         if (data['has_ended'] == true) {
           await _endRunDueToPartner();
           return;
         }
+
         final partnerLat = data['current_latitude'] as num;
         final partnerLng = data['current_longitude'] as num;
-        final calculatedDistance = Geolocator.distanceBetween(
-          currentLocation!.latitude,
-          currentLocation!.longitude,
-          partnerLat.toDouble(),
-          partnerLng.toDouble(),
-        );
 
         // Create a Position object for the partner
         final partnerPosition = Position(
@@ -303,16 +301,16 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           headingAccuracy: 0.0,
         );
 
-        // Add partner circle
-        _addPartnerCircle(partnerPosition);
-
-        setState(() {
-          _partnerDistance = calculatedDistance;
-          _partnerLocation = partnerPosition;
-        });
+        // Check gap distance between current user and partner
+        final gapDistance = Geolocator.distanceBetween(
+          currentLocation!.latitude,
+          currentLocation!.longitude,
+          partnerPosition.latitude,
+          partnerPosition.longitude,
+        );
 
         // Using 300 meters as the maximum allowed distance
-        if (calculatedDistance > 300.0 && !_hasEnded) {
+        if (gapDistance > 300.0 && !_hasEnded) {
           await supabase.from('duo_waiting_room').update({
             'has_ended': true,
           }).match({
@@ -322,6 +320,28 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           await _handleMaxDistanceExceeded();
           return;
         }
+
+        // Calculate partner's traveled distance incrementally.
+        if (_lastPartnerLocation != null) {
+          final segmentDistance = Geolocator.distanceBetween(
+            _lastPartnerLocation!.latitude,
+            _lastPartnerLocation!.longitude,
+            partnerPosition.latitude,
+            partnerPosition.longitude,
+          );
+          if (segmentDistance > 15.0) {
+            setState(() {
+              _partnerDistance += segmentDistance;
+            });
+          }
+        }
+        _lastPartnerLocation = partnerPosition;
+
+        // Update partner circle and location
+        _addPartnerCircle(partnerPosition);
+        setState(() {
+          _partnerLocation = partnerPosition;
+        });
       }
     } catch (e) {
       debugPrint('Error in partner polling: $e. Challenge ID: ${widget.challengeId}');
@@ -350,28 +370,11 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         // Update location in waiting room
         _updateDuoWaitingRoom(initialPosition);
 
-        // Start the run timer
-        runTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (!autoPaused && mounted) {
-            setState(() => secondsElapsed++);
-          }
-        });
+        // Start tracking using the mixin
+        startRun(initialPosition);
 
-        // Set the initial position and lastRecordedLocation
-        setState(() {
-          startLocation = initialPosition;
-          lastRecordedLocation = LatLng(initialPosition.latitude, initialPosition.longitude);
-          isTracking = true;
-        });
-
-        // Use platform-specific location tracking
-        if (Platform.isIOS) {
-          // iOS uses the native bridge
-          await _initializeIOSLocationBridge();
-        } else {
-          // Android uses the custom location handling
-          _setupCustomLocationHandling();
-        }
+        // Add custom location handling to properly update distance
+        _setupCustomLocationHandling();
       }
 
       // Fallback timer if initialization takes too long
@@ -380,21 +383,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           setState(() {
             _isInitializing = false;
           });
-
-          // Set up tracking if it hasn't been done yet
-          if (!isTracking) {
-            setState(() {
-              startLocation = currentLocation;
-              lastRecordedLocation = LatLng(currentLocation!.latitude, currentLocation!.longitude);
-              isTracking = true;
-            });
-
-            if (Platform.isIOS) {
-              _initializeIOSLocationBridge();
-            } else {
-              _setupCustomLocationHandling();
-            }
-          }
+          startRun(currentLocation!);
+          _setupCustomLocationHandling();
         }
       });
     } catch (e) {
@@ -443,15 +433,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   }
 
   /// Ends the run and saves all run data.
-  ///
-  /// This method handles the common logic for ending a run regardless
-  /// of the reason (manual end, partner ended, or maximum distance exceeded).
-  /// It cancels all subscriptions, saves the run data, and updates the UI.
-  ///
-  /// Parameters:
-  /// - reason: A string describing why the run ended (for logging)
-  /// - notifyPartner: Whether to notify the partner that the run has ended
-  /// - message: The message to show to the user
   Future<void> _endRun({
     required String reason,
     bool notifyPartner = false,
@@ -492,14 +473,12 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       ];
 
       if (notifyPartner) {
-        updatePromises.add(
-            supabase.from('duo_waiting_room').update({
-              'has_ended': true,
-            }).match({
-              'team_challenge_id': widget.challengeId,
-              'user_id': user.id,
-            })
-        );
+        updatePromises.add(supabase.from('duo_waiting_room').update({
+          'has_ended': true,
+        }).match({
+          'team_challenge_id': widget.challengeId,
+          'user_id': user.id,
+        }));
       }
 
       await Future.wait(updatePromises);
@@ -692,7 +671,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           );
         },
       ),
-      automaticallyImplyLeading: false, // Don't add a back button automatically
+      automaticallyImplyLeading: false,
     );
   }
 
@@ -705,14 +684,13 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
             : const LatLng(37.4219999, -122.0840575),
         zoom: 16,
       ),
-      myLocationEnabled: true, // Show default blue dot
+      myLocationEnabled: true,
       myLocationButtonEnabled: true,
       polylines: {routePolyline, _partnerRoutePolyline},
       circles: Set<Circle>.of(_circles.values),
       onMapCreated: (controller) => mapController = controller,
     );
   }
-
 
   /// Builds the bottom stats panel similar to the solo run page.
   Widget _buildBottomStatsPanel() {
@@ -741,7 +719,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Status indicators
+            // Status indicator for auto-pausing
             if (autoPaused)
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
