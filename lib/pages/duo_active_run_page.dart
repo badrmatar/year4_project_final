@@ -64,12 +64,6 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
   @override
   void initState() {
     super.initState();
-
-    // Initialize iOS location bridge if on iOS
-    if (Platform.isIOS) {
-      _initializeIOSLocationBridge();
-    }
-
     _initializeRun();
     _startPartnerPolling();
   }
@@ -154,7 +148,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           currentPoint.longitude,
         );
 
-        // Update distance only if not paused and segmentDistance > 17 meters
+        // Update distance only if not paused and segmentDistance > 15 meters
         if (segmentDistance > 15) {
           setState(() {
             distanceCovered += segmentDistance;
@@ -358,11 +352,16 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
         // Update location in waiting room
         _updateDuoWaitingRoom(initialPosition);
 
-        // Start tracking using the mixin
-        startRun(initialPosition);
-
-        // Add custom location handling to properly update distance
-        _setupCustomLocationHandling();
+        // Platform-specific location tracking setup
+        if (Platform.isIOS) {
+          // Only use iOS bridge for iOS
+          await _initializeIOSLocationBridge();
+        } else {
+          // Start tracking using the mixin for Android
+          startRun(initialPosition);
+          // Use custom location handling for Android
+          _setupCustomLocationHandling();
+        }
       }
 
       // Fallback timer if initialization takes too long
@@ -371,8 +370,12 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
           setState(() {
             _isInitializing = false;
           });
-          startRun(currentLocation!);
-          _setupCustomLocationHandling();
+
+          if (Platform.isIOS) {
+            // We're already using iOS bridge
+          } else {
+            startRun(currentLocation!);
+          }
         }
       });
     } catch (e) {
@@ -676,6 +679,8 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
 
   /// Builds the Google Map showing both runners.
   Widget _buildMap() {
+    Set<Polyline> polylines = {routePolyline, _partnerRoutePolyline};
+
     return GoogleMap(
       initialCameraPosition: CameraPosition(
         target: currentLocation != null
@@ -685,7 +690,7 @@ class _DuoActiveRunPageState extends State<DuoActiveRunPage>
       ),
       myLocationEnabled: true, // Show default blue dot
       myLocationButtonEnabled: true,
-      polylines: {routePolyline, _partnerRoutePolyline},
+      polylines: polylines,
       circles: Set<Circle>.of(_circles.values),
       onMapCreated: (controller) => mapController = controller,
     );
