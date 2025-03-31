@@ -9,8 +9,8 @@ class CurrentLocationMapPage extends StatefulWidget {
 
 class _CurrentLocationMapPageState extends State<CurrentLocationMapPage> {
   GoogleMapController? _mapController;
-  LatLng? _currentLatLng; // This will store the user's current location
-  bool _isLoading = true; // To show a progress indicator while fetching location
+  LatLng? _currentLatLng;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -26,18 +26,15 @@ class _CurrentLocationMapPageState extends State<CurrentLocationMapPage> {
         _isLoading = false;
       });
     } else {
-      // Handle location null scenario - permissions denied or service off
       setState(() {
         _isLoading = false;
       });
-      // You could show a dialog or fall back to a default location here.
     }
   }
 
   Future<Position?> _determinePosition() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      // Location services are not enabled. You could request them to enable it.
       return null;
     }
 
@@ -45,17 +42,14 @@ class _CurrentLocationMapPageState extends State<CurrentLocationMapPage> {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        // User denied permission.
         return null;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      // Permissions are permanently denied.
       return null;
     }
 
-    // Permissions granted and services enabled, get the position.
     return await Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.high,
     );
@@ -70,42 +64,42 @@ class _CurrentLocationMapPageState extends State<CurrentLocationMapPage> {
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
           : _currentLatLng == null
-          ? Center(
-        child: Text(
-          'Unable to get location.\nCheck permissions or enable GPS.',
-          textAlign: TextAlign.center,
-        ),
-      )
-          : Column(
-        children: [
-          Expanded(
-            child: GoogleMap(
-              onMapCreated: (controller) => _mapController = controller,
-              initialCameraPosition: CameraPosition(
-                target: _currentLatLng!,
-                zoom: 15,
-              ),
-              markers: {
-                Marker(
-                  markerId: MarkerId('currentLocation'),
-                  position: _currentLatLng!,
-                  infoWindow: InfoWindow(title: 'You are here'),
+              ? Center(
+                  child: Text(
+                    'Unable to get location.\nCheck permissions or enable GPS.',
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              : Column(
+                  children: [
+                    Expanded(
+                      child: GoogleMap(
+                        onMapCreated: (controller) =>
+                            _mapController = controller,
+                        initialCameraPosition: CameraPosition(
+                          target: _currentLatLng!,
+                          zoom: 15,
+                        ),
+                        markers: {
+                          Marker(
+                            markerId: MarkerId('currentLocation'),
+                            position: _currentLatLng!,
+                            infoWindow: InfoWindow(title: 'You are here'),
+                          ),
+                        },
+                        myLocationEnabled: true,
+                        myLocationButtonEnabled: true,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        'Saved Location: ${_currentLatLng!.latitude}, ${_currentLatLng!.longitude}',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ],
                 ),
-              },
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
-            ),
-          ),
-          // Display the saved location variables
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Saved Location: ${_currentLatLng!.latitude}, ${_currentLatLng!.longitude}',
-              style: TextStyle(fontSize: 16),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

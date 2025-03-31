@@ -1,4 +1,3 @@
-// lib/widgets/league_table_header.dart
 import 'package:flutter/material.dart';
 
 class LeagueTableHeader extends StatelessWidget {

@@ -1,4 +1,3 @@
-// lib/widgets/personal_contribution_item.dart
 import 'package:flutter/material.dart';
 import '../pages/run_map_view.dart';
 

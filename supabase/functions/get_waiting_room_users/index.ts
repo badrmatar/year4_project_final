@@ -1,34 +1,11 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Environment variables
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log('Edge function "get_waiting_room_users" is running!');
-
-/*
-  Incoming JSON: { "waiting_room_id": 999 }
-
-  Returns: an array like:
-  [
-    {
-      "user_id": 1,
-      "date_joined": "2025-01-11T10:00:00Z",
-      "users": {
-         "name": "Alice"
-      }
-    },
-    {
-      "user_id": 2,
-      "date_joined": "2025-01-11T11:00:00Z",
-      "users": {
-         "name": "Bob"
-      }
-    }
-  ]
-*/
 
 serve(async (req) => {
   try {
@@ -48,8 +25,6 @@ serve(async (req) => {
 
     const waitingRoomId = body.waiting_room_id;
 
-    // 1) Query waiting_rooms to get user_id, date_joined, plus a join on the "users" table
-    //    so we can retrieve the user's name.
     const { data, error } = await supabase
       .from('waiting_rooms')
       .select(`
@@ -66,8 +41,6 @@ serve(async (req) => {
         status: 400,
       });
     }
-
-    // Return the array of records
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

@@ -17,10 +17,6 @@ serve(async (req) => {
   try {
     const { league_room_id } = await req.json();
     console.log('Getting points for league room:', league_room_id);
-
-    // Get completed challenges for all teams in the league,
-    // including the challenge's earning_points, multiplier,
-    // and the teams data with streak_bonus_points.
     const { data: teamChallenges, error: challengesError } = await supabase
       .from('team_challenges')
       .select(`
@@ -47,8 +43,6 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Group challenges by team and calculate points using the challenge multiplier.
     const teamPoints = new Map<number, {
       team_id: number,
       team_name: string,
@@ -60,18 +54,16 @@ serve(async (req) => {
     teamChallenges.forEach(tc => {
       const teamId = tc.team_id;
       const teamName = tc.teams.team_name;
-      // Get the bonus points from the team join (if null, use 0)
       const bonus = tc.teams.streak_bonus_points || 0;
       const basePoints = tc.challenges.earning_points || 0;
       const multiplier = tc.multiplier || 1;
       const points = basePoints * multiplier;
 
       if (!teamPoints.has(teamId)) {
-        // Initialize with bonus already added once.
         teamPoints.set(teamId, {
           team_id: teamId,
           team_name: teamName,
-          total_points: bonus, // add bonus once
+          total_points: bonus,
           completed_challenges: 0,
           streak_bonus_points: bonus
         });
@@ -82,7 +74,6 @@ serve(async (req) => {
       team.completed_challenges += 1;
     });
 
-    // Convert to array and sort by total_points descending.
     const teamsWithPoints = Array.from(teamPoints.values())
       .sort((a, b) => b.total_points - a.total_points);
 

@@ -1,4 +1,3 @@
-// supabase/functions/update_team_streak/index.ts
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -19,8 +18,6 @@ serve(async (req) => {
     if (!team_id) {
       return new Response(JSON.stringify({ error: 'team_id is required' }), { status: 400 });
     }
-
-    // Get the team's current streak info
     const { data: team, error: teamError } = await supabase
       .from('teams')
       .select('current_streak, last_completion_date, team_name')
@@ -41,7 +38,6 @@ serve(async (req) => {
     const today = new Date();
     const todayDate = today.toISOString().split('T')[0];
 
-    // If there's no last completion date, this is the first completion
     if (!team.last_completion_date) {
       console.log('First completion for team - initializing streak');
       const { data, error } = await supabase
@@ -61,7 +57,6 @@ serve(async (req) => {
       return new Response(JSON.stringify({ data }), { status: 200 });
     }
 
-    // Calculate days between last completion and today
     const lastCompletion = new Date(team.last_completion_date);
     const daysDifference = Math.floor(
       (today.getTime() - lastCompletion.getTime()) / (1000 * 60 * 60 * 24)
@@ -70,8 +65,6 @@ serve(async (req) => {
     console.log('Days since last completion:', daysDifference);
 
     let newStreak = team.current_streak;
-
-    // If completed today, no change
     if (daysDifference === 0) {
       console.log('Already completed challenge today - no streak change');
       return new Response(
@@ -82,18 +75,14 @@ serve(async (req) => {
         { status: 200 }
       );
     }
-    // If completed yesterday, increment streak
     else if (daysDifference === 1) {
       newStreak += 1;
       console.log('Consecutive day completion - incrementing streak to:', newStreak);
     }
-    // If more than one day has passed, reset streak to 1
     else {
       newStreak = 1;
       console.log('Streak reset to 1 due to gap in completions');
     }
-
-    // Update the team's streak information
     const { data, error } = await supabase
       .from('teams')
       .update({

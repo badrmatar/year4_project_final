@@ -4,20 +4,20 @@ part 'challenge.g.dart'; // Required for json_serializable
 
 @JsonSerializable()
 class Challenge {
-  @JsonKey(name: 'challenge_id') // Maps to `challenge_id` in DB/JSON
+  @JsonKey(name: 'challenge_id')
   final int challengeId;
 
-  @JsonKey(name: 'start_time') // Maps to `start_time` in DB/JSON
+  @JsonKey(name: 'start_time')
   final DateTime startTime;
 
-  final int? duration; // Optional if DB allows NULL for `duration`
+  final int? duration;
 
-  @JsonKey(name: 'earning_points') // Maps to `earning_points` in DB/JSON
-  final int? earningPoints; // Optional if DB allows NULL for `earning_points`
+  @JsonKey(name: 'earning_points')
+  final int? earningPoints;
 
-  final String difficulty; // Required if non-NULL in DB
+  final String difficulty;
 
-  final double? length; // Changed from int? to double? for kilometer distances
+  final double? length;
 
   Challenge({
     required this.challengeId,
@@ -28,16 +28,13 @@ class Challenge {
     this.length,
   });
 
-  // Add a getter for formatted distance
   String get formattedDistance {
     if (length == null) return 'Distance: N/A';
     return 'Distance: ${length?.toStringAsFixed(1)} km';
   }
 
-  // Factory constructor to parse JSON into the `Challenge` object
   factory Challenge.fromJson(Map<String, dynamic> json) =>
       _$ChallengeFromJson(json);
 
-  // Method to convert `Challenge` object into JSON
   Map<String, dynamic> toJson() => _$ChallengeToJson(this);
 }

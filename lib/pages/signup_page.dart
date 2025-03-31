@@ -25,18 +25,14 @@ class _SignUpPageState extends State<SignUpPage> {
         );
         return;
       }
-
       setState(() {
         _isLoading = true;
       });
-
       bool success =
       await _authService.registerUser(context, _username, _email, _password);
-
       setState(() {
         _isLoading = false;
       });
-
       if (success && mounted) {
         Navigator.pushReplacementNamed(context, '/login');
       } else {
@@ -97,7 +93,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   _username = value.trim();
                 },
               ),
-              // Email Field
+              // Email
               TextFormField(
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
@@ -178,7 +174,7 @@ class _SignUpPageState extends State<SignUpPage> {
                 },
               ),
               const SizedBox(height: 32.0),
-              // Sign Up Button
+              // Sign Up
               ElevatedButton(
                 onPressed: _handleSignUp,
                 child: const Text('Sign Up'),
@@ -187,7 +183,6 @@ class _SignUpPageState extends State<SignUpPage> {
                 ),
               ),
               const SizedBox(height: 16.0),
-              // Link to Login Page
               TextButton(
                 onPressed: () {
                   Navigator.pushReplacementNamed(context, '/login');

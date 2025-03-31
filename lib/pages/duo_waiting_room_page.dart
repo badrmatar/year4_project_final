@@ -44,7 +44,6 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
 
   Future<void> _initializeLocation() async {
     try {
-      // Clean up any existing entries first
       await _cleanupExistingEntries();
 
       final initialPosition = await _locationService.getCurrentLocation();
@@ -65,7 +64,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
   Future<void> _cleanupExistingEntries() async {
     try {
       final user = Provider.of<UserModel>(context, listen: false);
-      // First, delete any existing entries for this user
+      // userentry delete
       await supabase
           .from('duo_waiting_room')
           .delete()
@@ -73,8 +72,6 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
         'user_id': user.id,
         'team_challenge_id': widget.teamChallengeId,
       });
-
-      // Also clean up any stale entries for this challenge
       final staleTime = DateTime.now().subtract(const Duration(seconds: 30));
       await supabase
           .from('duo_waiting_room')
@@ -94,7 +91,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
 
     final user = Provider.of<UserModel>(context, listen: false);
     try {
-      // Create new waiting room entry
+      //    new waiting room entry
       await supabase
           .from('duo_waiting_room')
           .insert({
@@ -126,7 +123,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
   }
 
   void _startStatusChecking() {
-    // Cancel existing timer if any
+    // timer cancrl
     _statusCheckTimer?.cancel();
 
     // Start new status check timer - checking more frequently (every 500ms)
@@ -141,23 +138,18 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
 
     try {
       final user = Provider.of<UserModel>(context, listen: false);
-
-      // Get all active waiting room entries for this challenge
       final response = await supabase
           .from('duo_waiting_room')
           .select('*, users(name)')
           .eq('team_challenge_id', widget.teamChallengeId)
-          .eq('has_ended', false);  // Only get active entries
+          .eq('has_ended', false);
 
       final rows = response as List;
-
-      // Find teammate's entry
       Map<String, dynamic>? teammateEntry;
       bool bothUsersPresent = false;
 
       if (rows.length == 2) {
         bothUsersPresent = true;
-        // Find the teammate's entry (not current user's entry)
         try {
           teammateEntry = rows.firstWhere(
                 (row) => row['user_id'] != user.id,
@@ -167,33 +159,27 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
           bothUsersPresent = false;
         }
       }
-
-      // Check if teammate's data is fresh (less than 10 seconds old)
       if (teammateEntry != null) {
         final lastUpdate = DateTime.parse(teammateEntry['last_update']);
         final timeDiff = DateTime.now().difference(lastUpdate).inSeconds;
         debugPrint('Time since teammate update: $timeDiff seconds');
 
-        if (timeDiff >= 15) {  // Increased from 10 to 15 seconds for more tolerance
+        if (timeDiff >= 15) {
           debugPrint('Teammate data considered stale');
-          teammateEntry = null;  // Data is stale, treat as no teammate
+          teammateEntry = null;
           bothUsersPresent = false;
         }
       }
-
-      // Update location more frequently when teammate is found
       if (bothUsersPresent && _currentLocation != null) {
         _updateLocationInWaitingRoom();
       }
 
       if (mounted) {
         setState(() {
-          _hasTeammate = bothUsersPresent;  // Only true when both users are present with fresh data
+          _hasTeammate = bothUsersPresent;
           _teammateInfo = teammateEntry;
         });
       }
-
-      // Update teammate distance if we have their location
       if (teammateEntry != null && _currentLocation != null) {
         final partnerLat = teammateEntry['current_latitude'] as num;
         final partnerLng = teammateEntry['current_longitude'] as num;
@@ -217,7 +203,6 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
         }
       }
 
-      // Check if both users are ready and have fresh data and are within the required distance
       if (bothUsersPresent) {
         final allReady = rows.every((row) => row['is_ready'] == true);
         final allRecent = rows.every((row) {
@@ -225,7 +210,7 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
           return DateTime.now().difference(updatedAt).inSeconds < 10;
         });
 
-        // Only proceed if users are close enough
+        // check if they are close
         final isCloseEnough = _teammateDistance != null && _teammateDistance! <= STARTING_PROXIMITY;
 
         if (allReady && allRecent && isCloseEnough) {
@@ -287,8 +272,6 @@ class _DuoWaitingRoomState extends State<DuoWaitingRoom> {
 
   Future<void> _setReady() async {
     final user = Provider.of<UserModel>(context, listen: false);
-
-    // Double check we're within distance before setting ready
     if (_teammateDistance == null || _teammateDistance! > STARTING_PROXIMITY) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

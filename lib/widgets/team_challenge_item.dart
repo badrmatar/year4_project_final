@@ -1,4 +1,3 @@
-// lib/widgets/team_challenge_item.dart
 import 'package:flutter/material.dart';
 
 class TeamChallengeItem extends StatelessWidget {

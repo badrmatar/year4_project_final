@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 
-/// A bridge class to communicate with native iOS code for background location tracking
 class IOSLocationBridge {
   static final IOSLocationBridge _instance = IOSLocationBridge._internal();
 
@@ -11,33 +10,25 @@ class IOSLocationBridge {
 
   IOSLocationBridge._internal();
 
-  // Method channel for communicating with native iOS code
   final MethodChannel _channel = const MethodChannel('com.duorun.location/background');
 
-  // Stream controller for broadcasting location updates from native code
   final _locationController = StreamController<Position>.broadcast();
 
-  // Stream controller for broadcasting errors
   final _errorController = StreamController<String>.broadcast();
 
-  // Stream controller for authorization status changes
   final _authStatusController = StreamController<String>.broadcast();
 
-  // Public streams
   Stream<Position> get locationStream => _locationController.stream;
   Stream<String> get errorStream => _errorController.stream;
   Stream<String> get authStatusStream => _authStatusController.stream;
 
-  // Flag to track if bridge is initialized
+  //check bridge
   bool _isInitialized = false;
 
-  // Initialize the bridge and set up method call handler
   Future<void> initialize() async {
     if (!Platform.isIOS || _isInitialized) return;
 
     _isInitialized = true;
-
-    // Set up method call handler for incoming calls from native code
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'locationUpdate':
@@ -68,8 +59,6 @@ class IOSLocationBridge {
       }
     });
   }
-
-  // Start background location updates on iOS
   Future<bool> startBackgroundLocationUpdates() async {
     if (!Platform.isIOS) return false;
 
@@ -82,7 +71,6 @@ class IOSLocationBridge {
     }
   }
 
-  // Stop background location updates on iOS
   Future<bool> stopBackgroundLocationUpdates() async {
     if (!Platform.isIOS) return false;
 
@@ -95,7 +83,6 @@ class IOSLocationBridge {
     }
   }
 
-  // Check authorization status for location services
   Future<String> checkAuthorizationStatus() async {
     if (!Platform.isIOS) return 'notSupported';
 
@@ -108,7 +95,6 @@ class IOSLocationBridge {
     }
   }
 
-  // Dispose resources
   void dispose() {
     if (Platform.isIOS) {
       stopBackgroundLocationUpdates();

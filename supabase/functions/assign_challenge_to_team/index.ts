@@ -1,7 +1,6 @@
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Load environment variables
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -17,7 +16,6 @@ serve(async (req: Request) => {
     const body = await req.json();
     const { user_id, challenge_id } = body;
 
-    // Validate input
     if (typeof user_id !== 'number' || typeof challenge_id !== 'number') {
       return new Response(
         JSON.stringify({ error: 'Invalid input. user_id and challenge_id must be numbers.' }),
@@ -25,7 +23,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Check if user exists
+    // cjck  user exists
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('user_id')
@@ -39,7 +37,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Check if user is in a team
+    // is he in team
     const { data: teamMembership, error: teamError } = await supabase
       .from('team_memberships')
       .select('team_id')
@@ -56,7 +54,7 @@ serve(async (req: Request) => {
 
     const team_id = teamMembership.team_id;
 
-    // Get the current challenge's start time
+    // challenge st time
     const { data: challengeData, error: challengeTimeError } = await supabase
       .from('challenges')
       .select('start_time')
@@ -70,7 +68,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Check if another team has already picked this specific challenge and it's still active
+    // does other team have chosen that challenge
     const { data: conflictingChallenge, error: conflictError } = await supabase
       .from('team_challenges')
       .select('team_challenge_id')
@@ -94,7 +92,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Check if the team has any active challenges FROM TODAY
+    // any active challenges tdy
     const startOfDay = new Date(challengeData.start_time);
     startOfDay.setUTCHours(0, 0, 0, 0);
 
@@ -119,7 +117,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Create a new team_challenge
+    //new team_challnege
     const { data: newTeamChallenge, error: createError } = await supabase
       .from('team_challenges')
       .insert({

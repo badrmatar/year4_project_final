@@ -7,12 +7,12 @@ plugins {
 
 
 
-def flutterVersionCode = null;
+def flutterVersionCode = null
 if (flutterVersionCode == null) {
     flutterVersionCode = "1"
 }
 
-def flutterVersionName = null;
+def flutterVersionName = null
 if (flutterVersionName == null) {
     flutterVersionName = "1.0"
 }

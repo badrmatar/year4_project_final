@@ -1,4 +1,3 @@
-// supabase/functions/create_user_contribution/index.ts
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -91,7 +90,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Insert contribution including the journey_type
+    // add contubtion
     const { data: newContribution, error: insertError } = await supabase
       .from('user_contributions')
       .insert({
@@ -120,7 +119,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Get all contributions for this challenge
+    // all challenge contirbution
     const { data: allContributions, error: sumError } = await supabase
       .from('user_contributions')
       .select('distance_covered, journey_type')
@@ -133,22 +132,18 @@ serve(async (req: Request) => {
         { status: 400 }
       );
     }
-
-    // Calculate totals and check completion
-    const totalMeters = allContributions.reduce((sum, c) => sum + (c.distance_covered || 0), 0);
+    const totalMeters = allContributions.reduce((sum, c) => sum + (c.distance_covered || 0), 0); //total calc
     const totalKm = totalMeters / 1000;
     const requiredKm = teamChallenge.challenges.length;
     const isCompleted = totalKm >= requiredKm;
     console.log('Total km:', totalKm, ' Required km:', requiredKm, ' Challenge Completed:', isCompleted);
 
-    // Calculate duo-specific distance
     const duoMeters = allContributions
-      .filter((c) => c.journey_type === 'duo')
+      .filter((c) => c.journey_type === 'duo') //calculates the distance i duo mode
       .reduce((sum, c) => sum + (c.distance_covered || 0), 0);
     const duoDistanceKm = duoMeters / 1000;
 
-    // Handle duo multiplier
-    if (duoDistanceKm >= requiredKm / 2) {
+    if (duoDistanceKm >= requiredKm / 2) {//if morec than half give them multi
       const { error: multiplierUpdateError } = await supabase
         .from('team_challenges')
         .update({ multiplier: 2 })
@@ -161,17 +156,10 @@ serve(async (req: Request) => {
         );
       }
     }
-
-    // In create_user_contribution/index.ts, replace the streak update section with:
-
-    // In create_user_contribution/index.ts, update the completion section:
-
-    // In create_user_contribution/index.ts
-    // In create_user_contribution/index.ts
     if (isCompleted) {
       console.log('Challenge completed! Updating status and streak...');
 
-      // Mark challenge as completed
+
       const { error: updateError } = await supabase
         .from('team_challenges')
         .update({ iscompleted: true })
@@ -181,7 +169,7 @@ serve(async (req: Request) => {
         console.error('Error marking challenge as completed:', updateError);
       }
 
-      // Update streak and check for bonus
+      // update streak and check for bonus
       const today = new Date().toISOString().split('T')[0];
 
       const { data: team, error: teamError } = await supabase
@@ -191,7 +179,7 @@ serve(async (req: Request) => {
         .single();
 
       if (!teamError && team) {
-        let newStreak = 1; // Default for first completion or broken streak
+        let newStreak = 1;
         let newBonusPoints = team.streak_bonus_points || 0;
 
         if (team.last_completion_date) {
@@ -201,9 +189,9 @@ serve(async (req: Request) => {
           );
 
           if (daysDifference === 0) {
-            newStreak = team.current_streak; // Keep current streak
+            newStreak = team.current_streak;
           } else if (daysDifference === 1) {
-            newStreak = team.current_streak + 1; // Increment streak
+            newStreak = team.current_streak + 1;
 
             // Award bonus every 3 days
             if (newStreak % 3 === 0) {
@@ -213,7 +201,6 @@ serve(async (req: Request) => {
           }
         }
 
-        // Update team streak and bonus points in a single update
         const { error: streakError } = await supabase
           .from('teams')
           .update({

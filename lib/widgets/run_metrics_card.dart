@@ -1,5 +1,3 @@
-// lib/widgets/run_metrics_card.dart
-
 import 'package:flutter/material.dart';
 
 class RunMetricsCard extends StatelessWidget {

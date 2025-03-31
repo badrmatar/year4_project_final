@@ -1,5 +1,3 @@
-// supabase/functions/register_user/index.ts
-
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -7,13 +5,10 @@ console.log(`Function "register_user" is up and running!`);
 
 serve(async (req) => {
   try {
-    // Only allow POST requests
     if (req.method !== 'POST') {
       console.log(`Received non-POST request: ${req.method}`);
       return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
     }
-
-    // Read the raw body for debugging
     const bodyText = await req.text();
     console.log(`Raw request body: ${bodyText}`);
 
@@ -24,8 +19,6 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Parse the request body
     let email: string;
     let password: string;
     try {
@@ -49,8 +42,6 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Validate data types
     if (typeof email !== 'string' || typeof password !== 'string') {
       console.warn('Invalid data types for email or password.');
       return new Response(
@@ -58,14 +49,12 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Initialize Supabase client with service role key
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
     console.log('Supabase client initialized.');
 
-    // Check if the email already exists
+    // emailk check
     const { data: existingUser, error: fetchError } = await supabase
       .from('users')
       .select('user_id, name, email')
@@ -79,33 +68,6 @@ serve(async (req) => {
         status: 400,
       });
     }
-/*
-    if (existingUser) {
-      console.warn(`User already exists with email: ${email}`);
-      return new Response(
-        JSON.stringify({ error: 'User already exists with this email.' }),
-        { status: 409 }
-      );
-    }
-
-    // Insert the new user into the database with plaintext password
-    const { data, error: insertError } = await supabase
-      .from('users')
-      .insert([
-        {
-          email: email,
-          password: password, // Storing plaintext password
-          // Add other fields as necessary
-        },
-      ]);
-
-    if (insertError) {
-      console.error(`Supabase error while inserting user: ${insertError.message}`);
-      return new Response(JSON.stringify({ error: insertError.message }), {
-        status: 400,
-      });
-    }
-*/
     if (!existingUser) {
       console.warn(`User does not exists with email: ${email}`);
       return new Response(
@@ -113,7 +75,6 @@ serve(async (req) => {
         { status: 409 }
       );
     }
-    // Registration successful
     const successResponse = {
       message: 'User found successfully.',
       id: existingUser.user_id,
@@ -133,14 +94,10 @@ serve(async (req) => {
   } catch (error) {
     console.error('Unexpected error:', error);
 
-    // Determine the environment
     const environment = Deno.env.get('ENVIRONMENT') || 'production';
     const isDevelopment = environment === 'development';
-
-    // Prepare the error response
     let errorMessage = 'Internal Server Error';
     if (isDevelopment) {
-      // Safely extract the error message
       const errorDetails = error instanceof Error ? error.message : String(error);
       errorMessage = `Internal Server Error: ${errorDetails}`;
     }

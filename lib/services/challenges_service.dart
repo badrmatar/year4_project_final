@@ -20,7 +20,6 @@ class ChallengeService {
     );
 
     if (response.statusCode != 201) {
-      // Handle errors
       throw Exception('Failed to create team challenge: ${response.body}');
     }
   }

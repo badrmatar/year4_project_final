@@ -41,30 +41,6 @@ serve(async (req) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // Since you have no 'auth.sessions' table, we just
-    // return success here. If you wanted to track login state
-    // in your 'users' table, you could do that below.
-    // ----------------------------------------------------------
-
-    /*
-    // Example (optional):
-    // Mark user as logged out in your 'users' table:
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ active_session: false })
-      .eq('user_id', userId);
-
-    if (updateError) {
-      console.error(`Error updating user session: ${updateError.message}`);
-      return new Response(JSON.stringify({ error: updateError.message }), { status: 400 });
-    }
-    */
-
     console.log(`User with ID ${userId} "logged out" (dummy).`);
     const successResponse = {
       message: 'User logged out successfully (no server session).',

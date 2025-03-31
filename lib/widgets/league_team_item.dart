@@ -1,4 +1,3 @@
-// lib/widgets/league_team_item.dart
 import 'package:flutter/material.dart';
 
 class LeagueTeamItem extends StatelessWidget {

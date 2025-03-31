@@ -9,7 +9,6 @@ import 'package:http/http.dart' as http;
 class HomePage extends StatelessWidget {
   const HomePage({Key? key}) : super(key: key);
 
-  /// Combines home stats with team points.
   Future<Map<String, dynamic>> _getCombinedStats(int userId) async {
     final homeStats = await StatsService().getHomeStats(userId);
     final teamPoints = await StatsService().getTeamPointsForUser(userId);
@@ -17,7 +16,6 @@ class HomePage extends StatelessWidget {
     return homeStats;
   }
 
-  /// Retrieves the active league room ID for the user.
   Future<int?> _getLeagueRoomId(int userId) async {
     final url =
         '${dotenv.env['SUPABASE_URL']}/functions/v1/get_active_league_room_id';
@@ -35,12 +33,10 @@ class HomePage extends StatelessWidget {
         return data['league_room_id'] as int?;
       }
     } catch (e) {
-      // Handle error if needed.
     }
     return null;
   }
 
-  /// Calls the logout function and returns true on success.
   Future<bool> _logoutUser(int userId) async {
     final url = '${dotenv.env['SUPABASE_URL']}/functions/v1/user_logout';
     try {
@@ -58,7 +54,6 @@ class HomePage extends StatelessWidget {
     }
   }
 
-  /// Helper method to create a bigger, consistent tip card.
   Widget _buildTipCard({
     required IconData icon,
     required Color iconColor,

@@ -70,8 +70,6 @@ serve(async (req: Request) => {
 
     console.log('Found active challenge:', JSON.stringify(activeChallenge, null, 2));
 
-    // ... [previous contribution insertion code remains the same]
-
     const totalDistance = totalContributions.reduce((sum, contribution) =>
       sum + (contribution.distance_covered || 0), 0);
 

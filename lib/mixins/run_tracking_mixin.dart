@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../services/location_service.dart';
 
 mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
-  // Common variables:
+
   final LocationService locationService = LocationService();
   Position? currentLocation;
   Position? startLocation;
@@ -18,7 +18,6 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
   bool autoPaused = false;
   StreamSubscription<Position>? locationSubscription;
 
-  // Mapping route points:
   final List<LatLng> routePoints = [];
   Polyline routePolyline = const Polyline(
     polylineId: PolylineId('route'),
@@ -28,13 +27,11 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
   );
   GoogleMapController? mapController;
 
-  // Auto-pause variables:
   int stillCounter = 0;
   final double pauseThreshold = 0.5;
   final double resumeThreshold = 1.0;
   LatLng? lastRecordedLocation;
 
-  /// Start run: initialize all variables and start tracking.
   void startRun(Position initialPosition) {
     setState(() {
       startLocation = initialPosition;
@@ -50,22 +47,16 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
       lastRecordedLocation = startPoint;
     });
 
-    // Start timer for elapsed time.
     runTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!autoPaused && mounted) {
         setState(() => secondsElapsed++);
       }
     });
 
-    // Subscribe to location updates.
     locationSubscription = locationService.trackLocation().listen((position) {
       if (!isTracking) return;
 
-      // Update auto-pause logic.
       final speed = position.speed.clamp(0.0, double.infinity);
-
-
-      // Calculate distance if not auto-paused.
       if (lastRecordedLocation != null && !autoPaused) {
         final newDistance = calculateDistance(
           lastRecordedLocation!.latitude,
@@ -80,8 +71,6 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
           });
         }
       }
-
-      // Update route points and current location.
       setState(() {
         currentLocation = position;
         final newPoint = LatLng(position.latitude, position.longitude);
@@ -89,14 +78,12 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
         routePolyline = routePolyline.copyWith(pointsParam: routePoints);
       });
 
-      // Optionally animate the map camera.
       mapController?.animateCamera(
         CameraUpdate.newLatLng(LatLng(position.latitude, position.longitude)),
       );
     });
   }
-
-  /// Stop the run.
+  
   void endRun() {
     runTimer?.cancel();
     locationSubscription?.cancel();
@@ -104,7 +91,6 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
     endLocation = currentLocation;
   }
 
-  /// Calculate distance using the haversine formula.
   double calculateDistance(double startLat, double startLng, double endLat, double endLng) {
     const double earthRadius = 6371000.0;
     final dLat = (endLat - startLat) * (pi / 180);
@@ -115,9 +101,6 @@ mixin RunTrackingMixin<T extends StatefulWidget> on State<T> {
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
     return earthRadius * c;
   }
-
-  /// Auto-pause logic based on speed.
-
 
   @override
   void dispose() {

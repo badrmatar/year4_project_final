@@ -1,4 +1,3 @@
-// lib/widgets/empty_league_state.dart
 import 'package:flutter/material.dart';
 
 class EmptyLeagueState extends StatelessWidget {

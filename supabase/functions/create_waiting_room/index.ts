@@ -5,13 +5,10 @@ console.log(`Function "create_waiting_room" is up and running!`);
 
 serve(async (req) => {
   try {
-    // Only allow POST requests
     if (req.method !== 'POST') {
       console.log(`Received non-POST request: ${req.method}`);
       return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
     }
-
-    // Read the raw body for debugging
     const bodyText = await req.text();
     console.log(`Raw request body: ${bodyText}`);
 
@@ -22,8 +19,6 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Parse the request body
     let userId: number;
     try {
       const parsedBody = JSON.parse(bodyText);
@@ -46,7 +41,6 @@ serve(async (req) => {
       );
     }
 
-    // Validate data type
     if (typeof userId !== 'number') {
       console.warn('Invalid data type for userId.');
       return new Response(
@@ -54,14 +48,11 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Initialize Supabase client with service role key
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
     console.log('Supabase client initialized.');
 
-    // First check if the user exists
     const { data: existingUser, error: userError } = await supabase
       .from('users')
       .select('user_id')
@@ -86,7 +77,6 @@ serve(async (req) => {
       );
     }
 
-    // Check if user already has an active waiting room (where league_room_id is null)
     const { data: existingWaitingRoom, error: checkError } = await supabase
       .from('waiting_rooms')
       .select('waiting_room_id')
@@ -112,7 +102,7 @@ serve(async (req) => {
       );
     }
 
-    // Create new waiting room
+    //   new waiting room
     const { data: newWaitingRoom, error: insertError } = await supabase
       .from('waiting_rooms')
       .insert([
@@ -150,14 +140,12 @@ serve(async (req) => {
   } catch (error) {
     console.error('Unexpected error:', error);
 
-    // Determine the environment
+
     const environment = Deno.env.get('ENVIRONMENT') || 'production';
     const isDevelopment = environment === 'development';
 
-    // Prepare the error response
     let errorMessage = 'Internal Server Error';
     if (isDevelopment) {
-      // Safely extract the error message
       const errorDetails = error instanceof Error ? error.message : String(error);
       errorMessage = `Internal Server Error: ${errorDetails}`;
     }

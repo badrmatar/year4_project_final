@@ -1,4 +1,3 @@
-// lib/services/history_service.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class HistoryService {
@@ -6,7 +5,7 @@ class HistoryService {
 
   Future<Map<String, dynamic>> fetchHistoryData(int userId) async {
     try {
-      // Fetch team challenges
+      // get team challenges
       final teamResponse = await supabase
           .from('team_memberships')
           .select('''
@@ -26,7 +25,7 @@ class HistoryService {
           ''')
           .eq('user_id', userId);
 
-      // Fetch personal contributions (including the "route" field)
+
       final personalResponse = await supabase
           .from('user_contributions')
           .select('''

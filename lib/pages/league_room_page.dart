@@ -1,10 +1,9 @@
-// lib/pages/league_room_page.dart
 import 'package:flutter/material.dart';
 import '../widgets/league_table_header.dart';
 import '../widgets/league_team_item.dart';
 import '../widgets/empty_league_state.dart';
 import '../services/league_service.dart';
-import '../widgets/loading_indicator.dart'; // Assuming you created this earlier
+import '../widgets/loading_indicator.dart';
 
 class LeagueRoomPage extends StatefulWidget {
   final int userId;
@@ -28,7 +27,7 @@ class _LeagueRoomPageState extends State<LeagueRoomPage> {
     _fetchLeagueRoomData();
   }
 
-  // Clean team name by removing trailing numbers.
+  // Clean team name
   String _getCleanTeamName(String teamName) {
     final regex = RegExp(r'^(.*?)(?:\s*\d+)?$');
     final match = regex.firstMatch(teamName);

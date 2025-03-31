@@ -1,11 +1,8 @@
 import { serve } from 'https://deno.land/std@0.175.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Load environment variables
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-
-// Create Supabase client using the service role key for insert operations
 const supabase = createClient(supabaseUrl, supabaseKey)
 
 serve(async (req: Request) => {
@@ -21,13 +18,10 @@ serve(async (req: Request) => {
   }
 
   const { team_id, challenge_id } = body
-
-  // Validate input
   if (typeof team_id !== 'number' || typeof challenge_id !== 'number') {
     return new Response(JSON.stringify({ error: 'team_id and challenge_id must be numbers' }), { status: 400 })
   }
 
-  // Insert the new record into team_challenges
   const { data, error } = await supabase
     .from('team_challenges')
     .insert({

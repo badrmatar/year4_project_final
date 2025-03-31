@@ -30,7 +30,6 @@ serve(async (req) => {
 
     const ownerUserId = waitingRoomData.user_id;
 
-    // Get teams data including current_streak
     const { data: teamsData, error: teamsError } = await supabase
       .from('teams')
       .select(`
@@ -48,18 +47,16 @@ serve(async (req) => {
 
     console.log('Teams data:', teamsData);
 
-    // Transform the data to include streak information in the expected format
     const teamsWithStreak = teamsData.map(team => ({
       ...team,
       teams: {
         team_name: team.team_name,
-        current_streak: team.current_streak || 0 // Ensure we always have a number, not null
+        current_streak: team.current_streak || 0
       }
     }));
 
     console.log('Transformed teams data:', teamsWithStreak);
 
-    // Return both the teams data and the owner ID
     return new Response(JSON.stringify({
       teams: teamsWithStreak,
       owner_id: ownerUserId

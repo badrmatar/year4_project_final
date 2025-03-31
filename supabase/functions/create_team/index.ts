@@ -27,7 +27,6 @@ serve(async (req) => {
     const { user_ids, league_room_id } = body
     console.log(`create_team: Processing request for user_ids=${JSON.stringify(user_ids)}, league_room_id=${league_room_id}`)
 
-    // Validate input
     if (!Array.isArray(user_ids) || user_ids.length === 0 || !user_ids.every(id => typeof id === 'number')) {
       console.error('create_team: Invalid user_ids:', user_ids)
       return new Response(JSON.stringify({ error: 'user_ids must be a non-empty array of numbers' }), { status: 400 })
@@ -37,8 +36,6 @@ serve(async (req) => {
       console.error('create_team: Invalid league_room_id:', league_room_id)
       return new Response(JSON.stringify({ error: 'league_room_id must be a number' }), { status: 400 })
     }
-
-    // Check league room exists and isn't ended
     const { data: leagueRoom, error: leagueRoomError } = await supabase
       .from('league_rooms')
       .select('*')
@@ -55,7 +52,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'League room has already ended' }), { status: 400 })
     }
 
-    // Fetch user names
+    // get users
     const { data: usersData, error: usersError } = await supabase
       .from('users')
       .select('user_id, name')
@@ -66,7 +63,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Error fetching users' }), { status: 400 })
     }
 
-    // Create unique team name using timestamp
+    // unique team nam by timestamp
     const timestamp = new Date().getTime();
     const team_name = `${usersData.map(u => u.name).join(' & ')} - ${timestamp}`;
     console.log('create_team: Creating team with name:', team_name);
@@ -83,7 +80,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Error creating team: ' + teamError?.message }), { status: 400 })
     }
 
-    // Create memberships
+    // new memberships
     const dateJoined = new Date().toISOString().split('T')[0];
     const memberships = user_ids.map(uid => ({
       team_id: newTeam.team_id,

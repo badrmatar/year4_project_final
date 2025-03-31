@@ -1,12 +1,9 @@
-// lib/models/user.dart
-
 import 'package:flutter/foundation.dart';
 
 class UserModel with ChangeNotifier {
   int _id;
   String _email;
   String _name;
-  // Add other user-related fields as needed
 
   UserModel({
     required int id,

@@ -30,7 +30,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // First, check if the user has any unassigned waiting room entries
     const { data: waitingRoomRow, error: findWrError } = await supabase
       .from('waiting_rooms')
       .select('waiting_room_id')
@@ -47,7 +46,7 @@ serve(async (req: Request) => {
 
     const waiting_room_id = waitingRoomRow.waiting_room_id;
 
-    // Fetch all users in this waiting room
+    // lal waiting room users
     const { data: waitingUsers, error: waitingUsersError } = await supabase
       .from('waiting_rooms')
       .select('user_id')
@@ -62,8 +61,7 @@ serve(async (req: Request) => {
     }
 
     const totalUsers = waitingUsers.length;
-
-    // Validate even number of users
+    //check even or not
     if (totalUsers % 2 !== 0) {
       return new Response(
         JSON.stringify({
@@ -73,7 +71,6 @@ serve(async (req: Request) => {
       );
     }
 
-    // Create league room
     const leagueRoomName = `New League Room - ${new Date().toISOString()}`;
     const { data: newLeagueRoom, error: leagueRoomError } = await supabase
       .from('league_rooms')
@@ -91,8 +88,6 @@ serve(async (req: Request) => {
     }
 
     const league_room_id = newLeagueRoom.league_room_id;
-
-    // Update waiting room entries for all users in this group
     const { error: updateError } = await supabase
       .from('waiting_rooms')
       .update({ league_room_id })
@@ -106,7 +101,6 @@ serve(async (req: Request) => {
       );
     }
 
-    // Distribute users into teams
     const userIds = waitingUsers.map((user) => user.user_id);
     const shuffledUserIds = userIds.sort(() => 0.5 - Math.random());
     const teams = [];
@@ -115,7 +109,6 @@ serve(async (req: Request) => {
       teams.push([shuffledUserIds[i], shuffledUserIds[i + 1]]);
     }
 
-    // Create teams sequentially
     for (const team of teams) {
       const { error: createTeamError } = await supabase.functions.invoke(
         'create_team',

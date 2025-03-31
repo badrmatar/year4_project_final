@@ -10,8 +10,6 @@ serve(async (req) => {
       console.log(`Received non-POST request: ${req.method}`);
       return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
     }
-
-    // Read the raw body for debugging
     const bodyText = await req.text();
     console.log(`Raw request body: ${bodyText}`);
 
@@ -22,8 +20,6 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Parse the request body
     let userId: number;
     let waitingRoomId: number;
     try {
@@ -39,8 +35,6 @@ serve(async (req) => {
     }
 
     console.log(`Parsed userId: ${userId}, waitingRoomId: ${waitingRoomId}`);
-
-    // Validate required fields
     if (!userId || !waitingRoomId) {
       console.log('Missing required fields.');
       return new Response(
@@ -48,8 +42,6 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Validate data types
     if (typeof userId !== 'number' || typeof waitingRoomId !== 'number') {
       console.warn('Invalid data types for userId or waitingRoomId.');
       return new Response(
@@ -57,14 +49,11 @@ serve(async (req) => {
         { status: 400 }
       );
     }
-
-    // Initialize Supabase client with service role key
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
     console.log('Supabase client initialized.');
 
-    // First check if the user exists
     const { data: existingUser, error: userError } = await supabase
       .from('users')
       .select('user_id')
@@ -88,8 +77,6 @@ serve(async (req) => {
         { status: 404 }
       );
     }
-
-    // Check if the waiting room exists and has null league_room_id
     const { data: waitingRoom, error: waitingRoomError } = await supabase
       .from('waiting_rooms')
       .select('*')
@@ -115,8 +102,6 @@ serve(async (req) => {
         { status: 404 }
       );
     }
-
-    // Check if the user is already in this waiting room
     const { data: existingParticipant, error: checkError } = await supabase
       .from('waiting_rooms')
       .select('waiting_room_id')
@@ -144,7 +129,7 @@ serve(async (req) => {
       );
     }
 
-    // Add the user to the waiting room
+    // Add user
     const { data: newParticipant, error: insertError } = await supabase
       .from('waiting_rooms')
       .insert([
@@ -183,14 +168,11 @@ serve(async (req) => {
   } catch (error) {
     console.error('Unexpected error:', error);
 
-    // Determine the environment
     const environment = Deno.env.get('ENVIRONMENT') || 'production';
     const isDevelopment = environment === 'development';
 
-    // Prepare the error response
     let errorMessage = 'Internal Server Error';
     if (isDevelopment) {
-      // Safely extract the error message
       const errorDetails = error instanceof Error ? error.message : String(error);
       errorMessage = `Internal Server Error: ${errorDetails}`;
     }

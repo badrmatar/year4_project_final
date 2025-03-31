@@ -1,4 +1,3 @@
-// lib/pages/journey_type_page.dart
 import 'package:flutter/material.dart';
 
 class JourneyTypePage extends StatelessWidget {
@@ -6,14 +5,11 @@ class JourneyTypePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Retrieve the arguments passed from ChallengesPage.
-    // We expect a 'challenge_id' and optionally a 'team_challenge_id' for duo runs.
     final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
     final challengeId = args['challenge_id'] as int;
-    // For duo runs, if a valid team_challenge_id is provided, use it; otherwise, you might want to handle that case.
     final teamChallengeId = args.containsKey('team_challenge_id')
         ? args['team_challenge_id'] as int
-        : challengeId; // Fallback: using challengeId (adjust this logic if needed)
+        : challengeId;
 
     return Scaffold(
       appBar: AppBar(
@@ -110,7 +106,6 @@ class JourneyTypePage extends StatelessWidget {
   }
 
   void _handleSoloRun(BuildContext context, int challengeId) {
-    // For solo runs, we pass the challenge id.
     Navigator.pushReplacementNamed(
       context,
       '/run_loading',
@@ -122,7 +117,6 @@ class JourneyTypePage extends StatelessWidget {
   }
 
   void _handleDuoRun(BuildContext context, int teamChallengeId) {
-    // For duo runs, we pass the valid team challenge id.
     Navigator.pushReplacementNamed(
       context,
       '/duo_waiting_room',

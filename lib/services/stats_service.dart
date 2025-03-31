@@ -8,8 +8,6 @@ class StatsService {
 
   Future<Map<String, dynamic>> getHomeStats(int userId) async {
     final DateTime now = DateTime.now().toUtc();
-
-    // Default stats values
     final Map<String, dynamic> stats = {
       'userName': 'Runner',
       'level': 1,
@@ -27,7 +25,6 @@ class StatsService {
     };
 
     try {
-      // 1. Get user info
       final userResponse = await supabase
           .from('users')
           .select('name')
@@ -37,7 +34,6 @@ class StatsService {
         stats['userName'] = userResponse['name'] ?? 'Runner';
       }
 
-      // 2. Get active team membership
       final membershipResponse = await supabase
           .from('team_memberships')
           .select('team_id')
@@ -48,7 +44,7 @@ class StatsService {
       if (membershipResponse != null) {
         final teamId = membershipResponse['team_id'];
 
-        // 3. Get team info (team_name, current_streak, etc.)
+        // get team info
         final teamResponse = await supabase
             .from('teams')
             .select('team_name, current_streak, streak_bonus_points, league_room_id')
@@ -61,8 +57,6 @@ class StatsService {
           stats['leagueRoomId'] = teamResponse['league_room_id'];
         }
 
-        // 4. Fetch the active challenge from team_challenges
-        //    Nest the 'challenges' table to get start_time, duration, and length.
         final activeChallengeResponse = await supabase
             .from('team_challenges')
             .select('''
@@ -82,7 +76,6 @@ class StatsService {
         if (activeChallengeResponse != null) {
           final challengeData = activeChallengeResponse['challenges'];
           if (challengeData != null) {
-            // Extract start_time and duration from the challenges table
             final String startTimeStr = challengeData['start_time'];
             final int? duration = challengeData['duration'] as int?;
 
@@ -99,19 +92,15 @@ class StatsService {
                 hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
               }
             }
-
-            // Use the "length" column as the challenge's target distance (assumed to be in kilometers)
             final double totalDistance = (challengeData['length'] ?? 0).toDouble();
             stats['challengeTotalDistance'] = totalDistance;
 
-            // Sum up user contributions from team_challenges
             final List<dynamic> contributions =
                 activeChallengeResponse['user_contributions'] ?? [];
             double totalDistanceCovered = 0.0;
             for (var contrib in contributions) {
               totalDistanceCovered += (contrib['distance_covered'] ?? 0).toDouble();
             }
-            // Convert contributions from meters to kilometers if needed
             final double distanceKm = totalDistanceCovered / 1000.0;
             stats['challengeDistanceCompleted'] = distanceKm;
 
@@ -123,8 +112,6 @@ class StatsService {
           }
         }
 
-        // 5. Calculate total team distance covered since the league started.
-        // Here, we sum contributions for all active team members.
         final activeMembersResponse = await supabase
             .from('team_memberships')
             .select('user_id')
@@ -145,12 +132,10 @@ class StatsService {
           for (var contrib in contributionsResponse) {
             totalTeamDistance += (contrib['distance_covered'] as num).toDouble();
           }
-          // Convert from meters to kilometers
+
           stats['distanceSinceLeagueStarted'] = totalTeamDistance / 1000.0;
         }
       }
-
-      // 6. Calculate today's personal distance
       final startOfDay = DateTime.utc(now.year, now.month, now.day);
       final endOfDay = startOfDay.add(const Duration(days: 1));
       final personalResponse = await supabase

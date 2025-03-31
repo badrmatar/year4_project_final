@@ -95,7 +95,7 @@ class _ChallengesPageState extends State<ChallengesPage> {
         };
       }).toList();
 
-      // Check if the active team challenge belongs to one of today's challenges.
+//check challenge
       dynamic activeTeamChallenge;
       if (teamChallengesWithDistance.isNotEmpty) {
         activeTeamChallenge = teamChallengesWithDistance.first;

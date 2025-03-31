@@ -31,29 +31,26 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
   Timer? _elapsedTimer;
   Timer? _autoStartTimer;
 
-  // Define the thresholds
   static const int AUTO_START_SECONDS = 5;
   static const double ACCEPTABLE_ACCURACY = 60.0; // meters
-  static const double GOOD_ACCURACY = 50.0; // meters for "good signal" indicator
+  static const double GOOD_ACCURACY = 50.0;
 
   @override
   void initState() {
     super.initState();
     _initializeLocationTracking();
 
-    // Timer to update elapsed time display and request new GPS fixes
     _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (mounted) {
         setState(() {
           _elapsedSeconds++;
         });
 
-        // Actively request a fresh location fix every second
         try {
           final newPosition = await _locationService.refreshCurrentLocation();
           if (mounted && newPosition != null) {
             setState(() {
-              // Update best position if this one is better
+
               if (_bestPosition == null || newPosition.accuracy < _bestPosition!.accuracy) {
                 _bestPosition = newPosition;
                 print('New improved position: accuracy ${newPosition.accuracy}m');
@@ -64,10 +61,9 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
           print('Error getting fresh location: $e');
         }
 
-        // Check if we should auto-start after AUTO_START_SECONDS
+        // (Auto-start has now been made redundant)
         if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition != null) {
           if (_bestPosition!.accuracy <= ACCEPTABLE_ACCURACY) {
-            // Cancel timers to avoid multiple calls
             _autoStartTimer?.cancel();
             _autoStartTimer = Timer(const Duration(milliseconds: 500), () {
               if (mounted) {
@@ -121,7 +117,6 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
   }
 
   void _monitorLocationQuality() {
-    // Listen to the quality stream for updates
     _locationService.qualityStream.listen((quality) {
       if (!mounted) return;
 
@@ -132,23 +127,14 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
       });
     });
 
-    // Create a separate subscription for continuous position updates
     _locationService.positionStream.listen((position) {
       if (!mounted) return;
-
-      // Log position updates to verify we're receiving them
       print('Position update: lat=${position.latitude}, lng=${position.longitude}, acc=${position.accuracy}m');
 
-      // Always update the displayed position and evaluate if it's better
       setState(() {
-        // Check if this is a better position than what we have
         if (_bestPosition == null || position.accuracy < _bestPosition!.accuracy) {
           _bestPosition = position;
-
-          // Log that we found a better position
           print('New best position! Accuracy: ${position.accuracy}m');
-
-          // Update UI message based on accuracy
           if (position.accuracy < GOOD_ACCURACY) {
             _isWaitingForSignal = false;
             _hasGoodSignal = true;
@@ -160,10 +146,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
           }
         }
 
-        // Even if it's not the best position, we should still reflect the current position
-        // in the UI for feedback purposes
         if (_bestPosition != null) {
-          // Display auto-start information if time threshold is met
           if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition!.accuracy <= ACCEPTABLE_ACCURACY) {
             _statusMessage = "Auto-starting with accuracy: ${_bestPosition!.accuracy.toStringAsFixed(1)}m";
           }
@@ -186,8 +169,6 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
 
   void _startRun() {
     if (_bestPosition == null) return;
-
-    // Cancel timers to prevent further callbacks
     _elapsedTimer?.cancel();
     _autoStartTimer?.cancel();
 
@@ -204,12 +185,11 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
 
   @override
   void dispose() {
-    // Make sure to clean up all resources
+    // cleanup
     _locationService.stopQualityMonitoring();
     _elapsedTimer?.cancel();
     _autoStartTimer?.cancel();
 
-    // Debug log to confirm resource cleanup
     print('RunLoadingPage disposed, all resources cleaned up');
     super.dispose();
   }
@@ -264,7 +244,6 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    // Signal strength indicator
                     Container(
                       width: 120,
                       height: 8,
@@ -299,7 +278,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
             ),
             if (_bestPosition != null) ...[
               const SizedBox(height: 16),
-              // Display current accuracy with live updates animation
+              // Display current accuracy
               TweenAnimationBuilder<double>(
                 tween: Tween<double>(begin: 0, end: _bestPosition!.accuracy),
                 duration: const Duration(milliseconds: 500),
@@ -337,7 +316,6 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                     fontSize: 14,
                   ),
                 ),
-              // Accuracy improvement indicator that shows if GPS is getting better
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10.0),
                 child: Column(
@@ -376,7 +354,6 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                 ),
               ),
 
-              // Progress indicator showing continuous efforts to improve GPS
               if (_elapsedSeconds >= AUTO_START_SECONDS && _bestPosition!.accuracy > ACCEPTABLE_ACCURACY)
                 Container(
                   width: 200,
@@ -387,7 +364,7 @@ class _RunLoadingPageState extends State<RunLoadingPage> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                   child: LinearProgressIndicator(
-                    value: _elapsedSeconds % 3 / 3, // Creates a cycling progress effect
+                    value: _elapsedSeconds % 3 / 3,
                     backgroundColor: Colors.transparent,
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
